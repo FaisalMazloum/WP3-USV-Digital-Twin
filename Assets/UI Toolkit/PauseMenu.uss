@@ -1,0 +1,16 @@
+.header {
+    font-size: 30px;
+    color: rgb(229, 14, 14);
+}
+
+.button {
+    width: 276px;
+    height: 274px;
+    justify-content: flex-start;
+    align-self: center;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    border-bottom-right-radius: 20px;
+    border-bottom-left-radius: 20px;
+    background-image: url("project://database/Assets/Package%20imports/Simple%20Buttons/Buttons%20Style%201%20(Rounded%20Purple)/ButtonsStyle1_03.png?fileID=21300000&guid=962d7198201944448a51b2b57b954427&type=3#ButtonsStyle1_03");
+}

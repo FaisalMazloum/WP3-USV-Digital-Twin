@@ -1,0 +1,9 @@
+.vscode/
+Library/
+Logs/
+Temp/
+UserSettings/
+UIElementsSchema/
+*.csproj
+*.sln
+mono_crash.mem.*
