@@ -15,7 +15,7 @@ public class FeatureExtractor : MonoBehaviour
     // public float publishInterval = 1f; // 1Hz
 
 
-
+    private CRMInstance crmInstance = new CRMInstance(); // create CRMInstance object
     private NeighborStateManager neighborStateManager;
     public GlobalCSVExporter _csvExporter;
 
@@ -84,6 +84,17 @@ public class FeatureExtractor : MonoBehaviour
     private Dictionary<GameObject, List<float>> F6_observations = new Dictionary<GameObject, List<float>>();
 
     public Dictionary<GameObject, List<allFeatures>> feature_list_history = new Dictionary<GameObject, List<allFeatures>>();
+
+
+
+    // --------------------------------- CRM ---------------------------------
+    // Temporal accumulation — rolling window of last n CRM outputs per observed robot
+    private Dictionary<GameObject, Queue<int>> crmHistory = new Dictionary<GameObject, Queue<int>>();
+    private const int CRM_HISTORY_LENGTH = 9; // 9s
+    // Fault status output — readable by other scripts
+    public Dictionary<GameObject, bool> isFaulty = new Dictionary<GameObject, bool>();
+
+
 
     const float Wc = 1f;                           // Sampling time-window
     const float k_observations = 10f;               // Required count of observations per sample
@@ -501,7 +512,72 @@ public class FeatureExtractor : MonoBehaviour
             ros.Publish(publishTopic, msg);
         }
 
+
+        // ===========================================================================
+        //                                  CRM 
+        // ===========================================================================
+        Dictionary<int, int> fvCounts = new Dictionary<int, int>();
+
+        foreach (var observedRobot in feature_list_history.Keys)
+        {
+            // get most recent sample
+            allFeatures latest = feature_list_history[observedRobot][feature_list_history[observedRobot].Count - 1];
+
+            // compute 6-bit FV index from binary features
+            int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
+                        (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
+
+            // count how many robots have this FV
+            if (!fvCounts.ContainsKey(fvIndex))
+                fvCounts[fvIndex] = 0;
+            fvCounts[fvIndex]++;
+        }
+        // run CRM
+        crmInstance.SimulationStep(fvCounts);
+        UpdateFaultStatus();
+
         PrintFeatures();
+    }
+
+    // ************************************ CRM ************************************
+    void UpdateFaultStatus()
+    {
+        foreach (var observedRobot in feature_list_history.Keys)
+        {
+            // get most recent sample
+            allFeatures latest = feature_list_history[observedRobot][feature_list_history[observedRobot].Count - 1];
+
+            // get FV index for this robot
+            int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
+                        (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
+
+            // get CRM classification for this robot's FV
+            int classification = crmInstance.FVClassification[fvIndex];
+
+            // initialize history queue if new robot
+            if (!crmHistory.ContainsKey(observedRobot))
+                crmHistory[observedRobot] = new Queue<int>();
+
+            // push new classification, pop oldest if window full
+            crmHistory[observedRobot].Enqueue(classification);
+            if (crmHistory[observedRobot].Count > CRM_HISTORY_LENGTH)
+                crmHistory[observedRobot].Dequeue();
+
+            // majority vote — declare faulty if more than half are attack (1)
+            int attackCount = 0;
+            foreach (int c in crmHistory[observedRobot])
+                if (c == 1) attackCount++;
+
+            isFaulty[observedRobot] = attackCount > CRM_HISTORY_LENGTH / 2;
+        }
+
+        // clean up robots no longer observed
+        var departed = crmHistory.Keys.Except(feature_list_history.Keys).ToList();
+        foreach (var robot in departed)
+        {
+            crmHistory.Remove(robot);
+            isFaulty.Remove(robot);
+        }
     }
 
     void PrintInterimFeatures()

@@ -479,11 +479,10 @@ public class CRMInstance
 
                 double tmp_apcconc = APC[j];
                 double tmp_exp1    = 9.0 * tmp_apcconc * tmp_apcconc;
-                if (tmp_exp1 <= 0.0) continue;
+                if (tmp_exp1 == 0.0) continue;
 
                 // Pe: probability effector conjugate has no regulatory neighbour on APC
-                double tmp_exp2 = (RCj[j] - 3.0 * tmp_apcconc) * (RCj[j] - 3.0 * tmp_apcconc);
-                double Pe       = tmp_exp2 / tmp_exp1;
+                double Pe       = (RCj[j] - 3.0 * tmp_apcconc) * (RCj[j] - 3.0 * tmp_apcconc) / tmp_exp1;
 
                 // Pr: probability regulatory conjugate has at least one effector neighbour on APC
                 double Pr = (6.0 * tmp_apcconc - ECj[j]) * ECj[j] / tmp_exp1;
@@ -500,8 +499,8 @@ public class CRMInstance
             }
 
             // se_rate = sr_rate = 0.0 in actual source — no continuous influx in ODE
-            dE[i] = effector_incr  - KDE * fE;
-            dR[i] = regulator_incr - KDR * fR;
+            dE[i] = effector_incr + SE_RATE - KDE * fE;
+            dR[i] = regulator_incr + SR_RATE - KDR * fR;
         }
     }
 
@@ -522,7 +521,7 @@ public class CRMInstance
 
         for (int j = 0; j < NUM_CLONES; j++)
         {
-            if (APC[j] <= 0.0) continue;
+            if (APC[j] == 0.0) continue;
 
             double sumE = 0.0, sumR = 0.0;
             for (int i = 0; i < NUM_CLONES; i++)

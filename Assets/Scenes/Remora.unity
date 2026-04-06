@@ -10060,7 +10060,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &521902327
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -10107,7 +10107,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 521902326}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: bde2d720165fb62109f4e767a27bc601, type: 3}
   m_Name: 
@@ -14595,6 +14595,7 @@ GameObject:
   m_Component:
   - component: {fileID: 753810535}
   - component: {fileID: 753810534}
+  - component: {fileID: 753810536}
   m_Layer: 0
   m_Name: HeatmapManager
   m_TagString: Untagged
@@ -14609,7 +14610,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 753810533}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 19f695dffa8e9c5a48a339006035a6d6, type: 3}
   m_Name: 
@@ -14630,6 +14631,19 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &753810536
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 753810533}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9595d761f185f38459e83be4a2862eed, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  start: 0
 --- !u!4 &754108996 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3192925013080293983, guid: 6c364f20083a9cf4c8e7a2c139d4c571, type: 3}
@@ -31138,7 +31152,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7acef0b79454c9b4dae3f8139bc4ba77, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_RosIPAddress: 192.168.8.141
+  m_RosIPAddress: 192.168.8.217
   m_RosPort: 10000
   m_ConnectOnStart: 1
   m_KeepaliveTime: 1
