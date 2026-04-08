@@ -111,13 +111,13 @@ public class AdaptiveSamplingPattern : MonoBehaviour
             }
             else if (previousMode == SamplingMode.HIGH_RES && Random.value <= RANDOM_DROPOUT_PROB*20.0f) // 10x higher chance of triggering dropout if prev_mode is HIGH_RES
             {
-                Debug.Log($"{gameObject.name} in focused_sampling");
+                // Debug.Log($"{gameObject.name} in focused_sampling");
                 // cmdVelSubscriber.TriggerDropout();
                 highComplexityAccumulator = 0f;
             }
             else if (Random.value <= RANDOM_DROPOUT_PROB*5.0f)
             {
-                Debug.Log($"{gameObject.name} in focused_sampling");
+                // Debug.Log($"{gameObject.name} in focused_sampling");
                 // cmdVelSubscriber.TriggerDropout();
                 highComplexityAccumulator = 0f;
             }

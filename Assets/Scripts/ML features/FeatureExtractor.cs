@@ -14,11 +14,14 @@ public class FeatureExtractor : MonoBehaviour
     private float timeElapsed;
     // public float publishInterval = 1f; // 1Hz
 
-
-    private CRMInstance crmInstance = new CRMInstance(); // create CRMInstance object
     private NeighborStateManager neighborStateManager;
     public GlobalCSVExporter _csvExporter;
 
+
+
+    // ==============================================================================
+    //                      FEATURE DEFINITIONS AND VECTORS 
+    // ==============================================================================
     public class allFeatures
     {
         // ============== numerical features are lists of k raw observations (except f5) per sample period ==============
@@ -86,33 +89,45 @@ public class FeatureExtractor : MonoBehaviour
     public Dictionary<GameObject, List<allFeatures>> feature_list_history = new Dictionary<GameObject, List<allFeatures>>();
 
 
+    // ==============================================================================
+    //                                  CRM 
+    // ==============================================================================
+    public CRMInstance crmInstance = new CRMInstance();
+    private System.Threading.Thread crmThread;
+    private volatile bool crmRunning = false;
+    private Dictionary<int, int> fvCounts_pending = new Dictionary<int, int>();
+    private object crmLock = new object();
 
-    // --------------------------------- CRM ---------------------------------
     // Temporal accumulation — rolling window of last n CRM outputs per observed robot
-    private Dictionary<GameObject, Queue<int>> crmHistory = new Dictionary<GameObject, Queue<int>>();
-    private const int CRM_HISTORY_LENGTH = 9; // 9s
+    public Dictionary<GameObject, Queue<int>> crmHistory = new Dictionary<GameObject, Queue<int>>();
+    public const int CRM_HISTORY_LENGTH = 9; // 9s
     // Fault status output — readable by other scripts
     public Dictionary<GameObject, bool> isFaulty = new Dictionary<GameObject, bool>();
 
 
+    // ==============================================================================
+    //                                LOOP CONTROL
+    // ==============================================================================
+    const float Wc                  = 1f;                           // Sampling time-window
+    const float k_observations      = 10f;               // Required count of observations per sample
+    const float ControlCycle        = Wc / k_observations; // 0.1s
+    // const float Wl               = 10f * Wc;                      // Long time-window
+    // const float Ws               = 5f * Wc;                       // Short time-Window
+    const float Wl                  = 10f;
+    const float Ws                  = 5f;
+    float sampleTimeElapsed;
+    float observationTimeElapsed;
+    public bool first_reset;
+    private int observationCount    = 0;
+    public bool creatingNewSample   = false; // this is for synchronization purposes. GlobalCSVExporter should only start timer when this is false (newly sample just inseeted).
 
-    const float Wc = 1f;                           // Sampling time-window
-    const float k_observations = 10f;               // Required count of observations per sample
-    const float ControlCycle = Wc / k_observations; // 0.1s
-    // const float Wl = 10f * Wc;                      // Long time-window
-    // const float Ws = 5f * Wc;                       // Short time-Window
-    const float Wl = 10f;
-    const float Ws = 5f;
+
+    // ==============================================================================
+    //                                ROBOT PARAMS
+    // ==============================================================================
     float max_range = 0f;
     float max_speed;
 
-    float sampleTimeElapsed;
-    float observationTimeElapsed;
-
-    public bool first_reset;
-    private int observationCount = 0;
-
-    public bool creatingNewSample = false; // this is for synchronization purposes. GlobalCSVExporter should only start timer when this is false (newly sample just inseeted).
 
     void Start()
     {
@@ -146,6 +161,15 @@ public class FeatureExtractor : MonoBehaviour
     }
 
     private int counter = 0;
+
+
+    void Update()
+    {
+        if (!crmRunning)
+            UpdateFaultStatus();
+    }
+
+
     void FixedUpdate()
     {
         if(_csvExporter._start)
@@ -532,9 +556,26 @@ public class FeatureExtractor : MonoBehaviour
                 fvCounts[fvIndex] = 0;
             fvCounts[fvIndex]++;
         }
-        // run CRM
-        crmInstance.SimulationStep(fvCounts);
-        UpdateFaultStatus();
+
+        // run CRM on background thread — avoids blocking main thread
+        // Debug.Log($"{transform.root.name} feature_list_history keys: " + string.Join(", ", feature_list_history.Keys.Select(k => k.name)));
+        // Debug.Log($"{transform.root.name} fvCounts: " + string.Join(", ", fvCounts.Select(kvp => $"FV={kvp.Key}:count={kvp.Value}")));
+
+        if (!crmRunning)
+        {
+            lock (crmLock)
+            {
+                fvCounts_pending = new Dictionary<int, int>(fvCounts);
+            }
+            crmRunning = true;
+            crmThread  = new System.Threading.Thread(() =>
+            {
+                crmInstance.SimulationStep(fvCounts_pending);
+                crmRunning = false;
+            });
+            crmThread.IsBackground = true;
+            crmThread.Start();
+        }
 
         PrintFeatures();
     }

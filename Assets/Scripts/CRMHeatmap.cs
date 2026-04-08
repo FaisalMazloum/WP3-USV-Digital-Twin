@@ -165,20 +165,24 @@ public class CRMHeatmap : MonoBehaviour
             FeatureExtractor fe = featureExtractors[i];
             if (fe == null || fe.isFaulty == null) continue;
 
+            // derive observer index from robot name, not array position
+            int observerIdx = int.Parse(new string(
+                fe.transform.root.name.Where(char.IsDigit).ToArray()));
+
+            if (observerIdx < 0 || observerIdx >= NUM_ROBOTS) continue;
+
             foreach (var kvp in fe.isFaulty)
             {
                 GameObject observedRobot = kvp.Key;
                 bool faulty              = kvp.Value;
 
-                // Parse observed robot index from name e.g. "remora3" → 3
                 int j = int.Parse(new string(
                     observedRobot.transform.root.name.Where(char.IsDigit).ToArray()));
 
-                if (j < 0 || j >= NUM_ROBOTS || i == j) continue;
+                if (j < 0 || j >= NUM_ROBOTS || observerIdx == j) continue;
 
-                // Red = faulty, Green = normal
-                cells[i, j].color    = faulty ? Color.red : Color.green;
-                cellTexts[i, j].text = faulty ? "F" : "N";
+                cells[observerIdx, j].color    = faulty ? Color.red : Color.green;
+                cellTexts[observerIdx, j].text = faulty ? "F" : "N";
             }
         }
     }

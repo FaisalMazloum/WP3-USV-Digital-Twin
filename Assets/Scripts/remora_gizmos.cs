@@ -158,7 +158,7 @@ public class remora_gizmos : MonoBehaviour
                         style
                         );
                 }
-                else
+                else if (neighbor_state_manager_._faultInjector.selectedFault == FaultInjector.FaultType.GradualMotor && neighbor_state_manager_._faultInjector.injectFault)
                 {
                     float max_RUL = 100f;
                     RUL_value = neighbor_state_manager_._cmdSubscriber.GetRULData()["RUL"];
@@ -176,6 +176,11 @@ public class remora_gizmos : MonoBehaviour
 
                     // DrawSonarRings(transform.root.position, Color.red, speed: 0.7f, numRings: 2);
                     // DrawSonarRings(transform.root.position, new Color(1.0f, 0.0f, 0.0f, 1.0f), speed: 0.7f, numRings: 2);
+                }
+                else if (neighbor_state_manager_._faultInjector.injectFault)
+                {
+                    style.normal.textColor = Color.red;
+                    UnityEditor.Handles.Label(transform.position + Vector3.forward * 0.25f, $"{neighbor_state_manager_.robotID.ToUpper()}", style);
                 }
             }
 
@@ -212,6 +217,76 @@ public class remora_gizmos : MonoBehaviour
                 // Debug.Log(neighbor_state_manager_.robotID + " in focused sampling");
             }
         }
+
+
+    // =======================================================================
+    //                        CRM FAULT DETECTION
+    // =======================================================================
+    if (Application.isPlaying)
+    {
+        FeatureExtractor fe = transform.root.GetComponentInChildren<FeatureExtractor>();
+        if (fe == null || fe.isFaulty == null || fe.crmInstance == null) return;
+
+        GUIStyle style = new GUIStyle();
+        style.fontSize  = 7;
+        style.fontStyle = FontStyle.Bold;
+        style.alignment = TextAnchor.UpperLeft;
+
+        // offset label position upward so it does not overlap existing labels
+        Vector3 basePos = transform.position + Vector3.forward * -0.5f;
+
+        // ── per observed robot ───────────────────────────────────────────
+        int lineOffset = 0;
+        foreach (var kvp in fe.isFaulty)
+        {
+            GameObject observedRobot = kvp.Key;
+            bool       faulty        = kvp.Value;
+            if (observedRobot == null) continue;
+
+            // get FV index for this observed robot
+            var history = fe.feature_list_history;
+            if (!history.ContainsKey(observedRobot) || history[observedRobot].Count == 0) continue;
+
+            FeatureExtractor.allFeatures latest = history[observedRobot][history[observedRobot].Count - 1];
+            int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
+                        (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
+
+            // CRM classification for this FV
+            int crm = fe.crmInstance.FVClassification[fvIndex];
+            string crmLabel = crm == 1 ? "ATK" : crm == 2 ? "TOL" : "UND";
+
+            // attack count in rolling window
+            int attackCount = 0;
+            if (fe.crmHistory.ContainsKey(observedRobot))
+                foreach (int c in fe.crmHistory[observedRobot])
+                    if (c == 1) attackCount++;
+
+            // affinity-weighted TE and TR for this FV's clone
+            double sumE = 0.0, sumR = 0.0;
+            for (int i = 0; i < 64; i++)
+            {
+                if (fe.crmInstance.TE[i] + fe.crmInstance.TR[i] <= 1e-3) continue;
+                double th = fe.crmInstance.theta[i, fvIndex];
+                sumE += th * fe.crmInstance.TE[i];
+                sumR += th * fe.crmInstance.TR[i];
+            }
+
+            // label color
+            style.normal.textColor = faulty ? Color.red : Color.green;
+
+            string label =
+                $"→ {observedRobot.name} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
+                $"CRM={crmLabel} | TE={sumE:F1} TR={sumR:F1} | " +
+                $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH} | " +
+                $"{(faulty ? "FAULTY" : "normal")}";
+
+            UnityEditor.Handles.Label(
+                basePos + Vector3.forward * (-0.3f * lineOffset),
+                label, style);
+
+            lineOffset++;
+        }
+    }
     }
 
 

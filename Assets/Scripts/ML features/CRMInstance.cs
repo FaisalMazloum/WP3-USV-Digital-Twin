@@ -47,20 +47,20 @@ public class CRMInstance
     // T-cell clone state — indexed by clone index i = FV index (0..63)
     // Clones are treated as dead when TE[i] + TR[i] <= CELL_LOWER_BOUND
     // -------------------------------------------------------------------------
-    private double[] TE;       // effector T-cell density per clone
-    private double[] TR;       // regulatory T-cell density per clone
+    public double[] TE;       // effector T-cell density per clone
+    public double[] TR;       // regulatory T-cell density per clone
 
     // -------------------------------------------------------------------------
     // APC sub-populations — indexed by FV index j (0..63)
     // APC[j] = 0 means no robots observed with FV j this cycle
     // -------------------------------------------------------------------------
-    private double[] APC;      // A_j = neighbor_count_j * FV_TO_APC_SCALING
+    public double[] APC;      // A_j = neighbor_count_j * FV_TO_APC_SCALING
 
     // -------------------------------------------------------------------------
     // Affinity matrix — precomputed once, never changes
     // theta[i,j] = exp( -HammingDist(i,j) / (c * l) )
     // -------------------------------------------------------------------------
-    private double[,] theta;
+    public double[,] theta;
 
     // -------------------------------------------------------------------------
     // Per-cycle intermediate values indexed by active APC j
