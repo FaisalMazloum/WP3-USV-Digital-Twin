@@ -104,6 +104,8 @@ public class FeatureExtractor : MonoBehaviour
     // Fault status output — readable by other scripts
     public Dictionary<GameObject, bool> isFaulty = new Dictionary<GameObject, bool>();
 
+    private volatile bool crmResultReady = false;
+
 
     // ==============================================================================
     //                                LOOP CONTROL
@@ -165,8 +167,12 @@ public class FeatureExtractor : MonoBehaviour
 
     void Update()
     {
-        if (!crmRunning)
+        // crmResultReady = true;
+        if (crmResultReady)
+        {
+            crmResultReady = false;
             UpdateFaultStatus();
+        }
     }
 
 
@@ -568,9 +574,10 @@ public class FeatureExtractor : MonoBehaviour
                 fvCounts_pending = new Dictionary<int, int>(fvCounts);
             }
             crmRunning = true;
-            crmThread  = new System.Threading.Thread(() =>
+            crmThread = new System.Threading.Thread(() =>
             {
                 crmInstance.SimulationStep(fvCounts_pending);
+                crmResultReady = true;
                 crmRunning = false;
             });
             crmThread.IsBackground = true;

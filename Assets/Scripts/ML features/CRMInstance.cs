@@ -31,7 +31,7 @@ public class CRMInstance
     private const double KPR               = 0.7e-3;     // regulatory proliferation rate (πR)
     private const double KDE               = 1e-6;       // effector death rate (δ)
     private const double KDR               = 1e-6;       // regulatory death rate (δ)
-    private const double CROSS_AFFINITY    = 0.15;       // c — cross-reactivity
+    private const double CROSS_AFFINITY    = 0.11;       // c — cross-reactivity
     private const double FV_TO_APC_SCALING = 0.002;      // k — scales robot count to APC density
     private const int    SITES             = 3;          // s — binding sites per APC
     private const double KON               = 0.1;        // γc — conjugation rate

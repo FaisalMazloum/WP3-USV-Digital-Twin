@@ -12,10 +12,10 @@ using UnityEngine.UI;
 public class CRMHeatmap : MonoBehaviour
 {
     private const int   NUM_ROBOTS  = 10;
-    private const float CELL_SIZE   = 29f;
+    private const float CELL_SIZE   = 25f;
     private const float HEADER_SIZE = 40f;
     private const float PADDING     = 10f;
-    private const float PADDING_Y   = 50f;
+    private const float PADDING_Y   = 130f;
     private const float FONT_SIZE   = 10f;
 
     // All FeatureExtractor components in the scene — one per robot

@@ -37,9 +37,9 @@ public class CmdVel_Subscriber : MonoBehaviour
     [Header("PID Gains")]
     public float Kp = 10f;
     public float Ki = 5f;
-    public float Kd = 0f;
-    public float integralClamp = 10f;
-    public float maxForce = 0.25f;
+    public float Kd = 0.3f;
+    public float integralClamp = 0.1f;
+    public float maxForce = 0.3f;
 
     private float rightIntegral = 0f;
     private float rightPreviousError = 0f;

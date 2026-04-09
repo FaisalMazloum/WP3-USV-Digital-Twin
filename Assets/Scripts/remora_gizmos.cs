@@ -181,6 +181,13 @@ public class remora_gizmos : MonoBehaviour
                 {
                     style.normal.textColor = Color.red;
                     UnityEditor.Handles.Label(transform.position + Vector3.forward * 0.25f, $"{neighbor_state_manager_.robotID.ToUpper()}", style);
+                    DrawSonarRings(transform.root.position, Color.red, speed: 0.7f, numRings: 2);
+                    DrawSonarRings(transform.root.position, new Color(0.7f, 0.1f, 0.1f, 0.8f), speed: 0.7f, numRings: 2);
+                }
+                else
+                {
+                    style.normal.textColor = Color.green;
+                    UnityEditor.Handles.Label(transform.position + Vector3.forward * 0.25f, $"{neighbor_state_manager_.robotID.ToUpper()}", style);
                 }
             }
 
@@ -228,14 +235,14 @@ public class remora_gizmos : MonoBehaviour
         if (fe == null || fe.isFaulty == null || fe.crmInstance == null) return;
 
         GUIStyle style = new GUIStyle();
-        style.fontSize  = 7;
+        style.fontSize  = 8;
         style.fontStyle = FontStyle.Bold;
         style.alignment = TextAnchor.UpperLeft;
 
         // offset label position upward so it does not overlap existing labels
         Vector3 basePos = transform.position + Vector3.forward * -0.5f;
 
-        // ── per observed robot ───────────────────────────────────────────
+        // ----------- per observed robot
         int lineOffset = 0;
         foreach (var kvp in fe.isFaulty)
         {
@@ -272,17 +279,27 @@ public class remora_gizmos : MonoBehaviour
             }
 
             // label color
-            style.normal.textColor = faulty ? Color.red : Color.green;
-
+            style.normal.textColor = faulty ? Color.white : Color.green;
+            if (lineOffset != 0)
+            {
+                    
+            }
             string label =
-                $"→ {observedRobot.name} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
+                $"r{observedRobot.name.Substring(6)} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
                 $"CRM={crmLabel} | TE={sumE:F1} TR={sumR:F1} | " +
-                $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH} | " +
-                $"{(faulty ? "FAULTY" : "normal")}";
+                $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
 
             UnityEditor.Handles.Label(
                 basePos + Vector3.forward * (-0.3f * lineOffset),
                 label, style);
+
+            // string label =
+            //     // $"r{observedRobot.name.Substring(6)} \n FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) \n " +
+            //     // $"CRM={crmLabel} \n TE={sumE:F1} TR={sumR:F1} \n " +
+            //     // $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
+            // UnityEditor.Handles.Label(
+            //     basePos + Vector3.forward * (-1f * lineOffset),
+            //     label, style);
 
             lineOffset++;
         }

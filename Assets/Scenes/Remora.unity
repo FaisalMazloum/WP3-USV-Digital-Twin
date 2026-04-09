@@ -801,8 +801,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 413413381}
   numberOfRobots: 9
-  spacing: 1
-  selected_layout: 1
+  spacing: 5
+  selected_layout: 2
   arenaSize: 20
   robotDiameter: 0.45
   safetyMargin: 0.1
@@ -8189,8 +8189,8 @@ MonoBehaviour:
   thruster_separation: 0
   Kp: 10
   Ki: 5
-  Kd: 0
-  integralClamp: 10
+  Kd: 0.3
+  integralClamp: 0.1
   maxForce: 0.3
   print_RUL: 0
   in_dropout: 0
@@ -19366,7 +19366,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &983131848
 Transform:
   m_ObjectHideFlags: 0
