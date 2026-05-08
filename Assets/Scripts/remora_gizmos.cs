@@ -279,7 +279,7 @@ public class remora_gizmos : MonoBehaviour
             }
 
             // label color
-            style.normal.textColor = faulty ? Color.white : Color.green;
+            style.normal.textColor = faulty ? new Color(1.0f, 0.1f, 0.1f, 1.0f) : Color.green;
             if (lineOffset != 0)
             {
                     
