@@ -34,6 +34,10 @@ public class RemoraLIDAR : MonoBehaviour
 
     void Start()
     {
+
+        // --------------------- //
+        // Simulation Parameters //
+        // --------------------- //
         angleMin = 0f;
         angleMax = 360f;
         angleIncrement = 0.8f;
@@ -41,6 +45,20 @@ public class RemoraLIDAR : MonoBehaviour
         rangeMax = 10f; // different range from RAB range
         scanFrequency = 5f;
 
+        // --------------------- //
+        //    TEST Parameters    //
+        // --------------------- //
+        // angleMin = 0f;
+        // angleMax = 360f;
+        // angleIncrement = 2.0f;
+        // rangeMin = 0.15f;
+        // rangeMax = 10f; // different range from RAB range
+        // scanFrequency = 5f;
+
+
+        // --------------------- //
+        //         ROS2          //
+        // --------------------- //
         robotID = transform.root.name;
         frameId = robotID + "/" + frameId_suffix;
         
@@ -50,7 +68,7 @@ public class RemoraLIDAR : MonoBehaviour
         rosTopic_obstacles = $"/{robotID}/obstacle_ranges";   // RangeData - all obstacles
         
         ros = ROSConnection.GetOrCreateInstance();
-        ros.RegisterPublisher<LaserScanMsg>(rosTopic_laserscan);
+        // ros.RegisterPublisher<LaserScanMsg>(rosTopic_laserscan);
         ros.RegisterPublisher<RangeDataMsg>(rosTopic_rangedata);
         ros.RegisterPublisher<RangeDataMsg>(rosTopic_obstacles);
         
@@ -184,8 +202,11 @@ public class RemoraLIDAR : MonoBehaviour
             //     Debug.Log($"[{gameObject.name}] Robot rays detected: {robotRayCount}");
             // }
 
-            // Publish all three messages
-            ros.Publish(rosTopic_laserscan, laserscan_msg);     // /laserscan (LaserScan)
+
+            // ----------------------------------------------------------- //
+            //                  Publish all three messages                 //
+            // ----------------------------------------------------------- //
+            // ros.Publish(rosTopic_laserscan, laserscan_msg);     // /laserscan (LaserScan)
             ros.Publish(rosTopic_obstacles, obstacle_msg);      // /obstacle_ranges (RangeData - all)
             ros.Publish(rosTopic_rangedata, rangedata_msg);     // /range_data (RangeData - robots only)
 

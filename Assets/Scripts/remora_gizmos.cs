@@ -1,5 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Std;
 using UnityEngine;
 
 public class remora_gizmos : MonoBehaviour
@@ -10,6 +12,10 @@ public class remora_gizmos : MonoBehaviour
     private NeighborStateManager neighbor_state_manager_;
     private RABSensor rab_;
     private CmdVel_Subscriber thrusters_;
+
+    private ROSConnection ros_;
+    private string currentPatternTopic_;
+    private string currentPattern_ = "";
 
 
     void Start()
@@ -33,6 +39,15 @@ public class remora_gizmos : MonoBehaviour
         thrusters_ = transform.root.GetComponentInChildren<CmdVel_Subscriber>();
         if (thrusters_)
             Debug.LogError("CmdVel Script missing on " + gameObject.name);
+
+        ros_ = ROSConnection.GetOrCreateInstance();
+        currentPatternTopic_ = $"/{transform.root.name}/current_pattern";
+        ros_.Subscribe<StringMsg>(currentPatternTopic_, OnCurrentPatternReceived);
+    }
+
+    private void OnCurrentPatternReceived(StringMsg msg)
+    {
+        currentPattern_ = msg.data;
     }
 
     void Update()
@@ -67,47 +82,68 @@ public class remora_gizmos : MonoBehaviour
 
 
         // =======================================================================
-        //                        ADAPATIVE SAMPLING
+        //                        CURRENT TASK/PATTERN
         // =======================================================================
         if (Application.isPlaying)
         {
-            // 1. Create a custom style
             GUIStyle style = new GUIStyle();
             style.fontSize = 8;
             style.alignment = TextAnchor.LowerLeft;
             style.fontStyle = FontStyle.Bold;
+            style.normal.textColor = Color.cyan;
 
-            string t = "";
-
-            if (adaptive_sampling_.currentMode == AdaptiveSamplingPattern.SamplingMode.HIGH_RES)
-            {
-                t = "HIGH_RES mode";
-                style.normal.textColor = Color.cyan;
-            }
-            else if (adaptive_sampling_.currentMode == AdaptiveSamplingPattern.SamplingMode.INVESTIGATION)
-            {
-                t = "INVESTIGATION mode";
-                style.normal.textColor = Color.cyan;
-            }
-            else
-            {
-                t = "SURVEY mode";
-                style.normal.textColor = Color.cyan;
-            }
-
-            string historyText = string.Join(" -> ", adaptive_sampling_.GetTurnHistory());
-            t = "(" + t + ")" + "\nTurns: [" + historyText + "]";
-
-            // style.fontStyle = FontStyle.Bold;
-
-            // 3. Apply the style to the label
             UnityEditor.Handles.Label(
                 transform.position + Vector3.forward * 0.5f,
-                $"{t}", 
+                $"({currentPattern_})",
                 style
             );
         }
+
+        // =======================================================================
+        //                        ADAPATIVE SAMPLING
+        // =======================================================================
+        // if (Application.isPlaying)
+        // {
+        //     // 1. Create a custom style
+        //     GUIStyle style = new GUIStyle();
+        //     style.fontSize = 8;
+        //     style.alignment = TextAnchor.LowerLeft;
+        //     style.fontStyle = FontStyle.Bold;
+
+        //     string t = "";
+
+        //     if (adaptive_sampling_.currentMode == AdaptiveSamplingPattern.SamplingMode.HIGH_RES)
+        //     {
+        //         t = "HIGH_RES mode";
+        //         style.normal.textColor = Color.cyan;
+        //     }
+        //     else if (adaptive_sampling_.currentMode == AdaptiveSamplingPattern.SamplingMode.INVESTIGATION)
+        //     {
+        //         t = "INVESTIGATION mode";
+        //         style.normal.textColor = Color.cyan;
+        //     }
+        //     else
+        //     {
+        //         t = "SURVEY mode";
+        //         style.normal.textColor = Color.cyan;
+        //     }
+
+        //     string historyText = string.Join(" -> ", adaptive_sampling_.GetTurnHistory());
+        //     t = "(" + t + ")" + "\nTurns: [" + historyText + "]";
+
+        //     // style.fontStyle = FontStyle.Bold;
+
+        //     // 3. Apply the style to the label
+        //     UnityEditor.Handles.Label(
+        //         transform.position + Vector3.forward * 0.5f,
+        //         $"{t}", 
+        //         style
+        //     );
+        // }
+
+        // ---------------------------------------------------- //
         // Draw a grid showing what mode each position would be
+        // ---------------------------------------------------- //
         // for (float x = 90; x < 111; x += 0.5f)
         // {
         //     for (float z = 90; z < 111; z += 0.5f)
