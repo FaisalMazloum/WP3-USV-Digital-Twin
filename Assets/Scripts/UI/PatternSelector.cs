@@ -26,8 +26,7 @@ public class PatternSelector : MonoBehaviour
     // ----------------------- //
     ROSConnection ros;
 
-    public string rosTopic;
-
+    string rosTopic;
     private float timeElapsed;
     
     void Start()

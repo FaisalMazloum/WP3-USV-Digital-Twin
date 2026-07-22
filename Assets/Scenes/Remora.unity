@@ -680,14 +680,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 413413381}
-  numberOfRobots: 9
-  spacing: 5
-  selected_layout: 2
+  numberOfRobots: 8
+  spacing: 2
+  selected_layout: 0
   arenaSize: 20
   robotDiameter: 0.45
   safetyMargin: 0.1
   maxRetries: 100
-  randomSeed: 2
+  randomSeed: 3
 --- !u!1 &29082011
 GameObject:
   m_ObjectHideFlags: 0
@@ -1535,10 +1535,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c91c89f01aaf3d65f8caf41bb186ed02, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  fov: 120
-  range: 5
-  raysPerTag: 20
-  detectionThreshold: 0.9
 --- !u!1001 &106404989
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -8040,7 +8036,7 @@ Transform:
   m_GameObject: {fileID: 413413381}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 100, y: 4, z: 100}
+  m_LocalPosition: {x: 92, y: 4, z: 94}
   m_LocalScale: {x: 0.001, y: 0.001, z: 0.001}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -32278,7 +32274,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   selected_pattern: 4
-  rosTopic: 
+  robots:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
 --- !u!1001 &1669335858
 PrefabInstance:
   m_ObjectHideFlags: 0
