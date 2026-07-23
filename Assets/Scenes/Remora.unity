@@ -680,7 +680,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 413413381}
-  numberOfRobots: 8
+  numberOfRobots: 9
   spacing: 2
   selected_layout: 0
   arenaSize: 20
@@ -890,11 +890,12 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 1623410254}
   - {fileID: 895198450}
   - {fileID: 1408564640}
   - {fileID: 780807029}
   - {fileID: 28839753}
-  - {fileID: 1623410254}
+  - {fileID: 1664194979}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &39825995 stripped
@@ -3079,7 +3080,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &188136565
 Transform:
   m_ObjectHideFlags: 0
@@ -15590,7 +15591,6 @@ Transform:
   - {fileID: 1328579443}
   - {fileID: 1398189928}
   - {fileID: 1847026558}
-  - {fileID: 1664194979}
   m_Father: {fileID: 39614691}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &784550176
@@ -23423,7 +23423,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1228924896
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -32254,12 +32254,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1664194978}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -19.693558, y: 22.699932, z: 14.019409}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 780807029}
+  m_Father: {fileID: 39614691}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1664194980
 MonoBehaviour:
@@ -39807,7 +39807,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &2021495444
 Transform:
   m_ObjectHideFlags: 0
@@ -43275,7 +43275,7 @@ SceneRoots:
   - {fileID: 2020758441}
   - {fileID: 413413388}
   - {fileID: 102376142}
-  - {fileID: 983131848}
   - {fileID: 2032113572}
   - {fileID: 1802420802}
   - {fileID: 1425638168}
+  - {fileID: 983131848}

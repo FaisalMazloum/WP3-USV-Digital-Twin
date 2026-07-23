@@ -16,7 +16,8 @@ public class CRMHeatmap : MonoBehaviour
 {
     private const int   NUM_ROBOTS      = 10;
     private const float CELL_SIZE       = 50f;
-    private const float HEADER_SIZE     = 40f;
+    private const float HEADER_SIZE     = 60f;
+    private const float COL_LABEL_ROW_HEIGHT = 14f;
     private const float ROW_LABEL_WIDTH = 70f;
     private const float ROW_NUM_COL_WIDTH = 20f;
     private const float PADDING         = 10f;
@@ -26,6 +27,7 @@ public class CRMHeatmap : MonoBehaviour
     private const float TOP5_ROW_HEIGHT  = 18f;
     private const int   TOP5_COUNT       = 5;
     private const int   ROW_TOP_COUNT    = 3;
+    private const int   COL_TOP_COUNT    = 3;
 
     // All FeatureExtractor components in the scene — one per robot
     private FeatureExtractor[] featureExtractors;
@@ -43,6 +45,10 @@ public class CRMHeatmap : MonoBehaviour
     // Per-row readout (2nd column, next to the row number) — each observer's own top BFVs
     // across everything it currently observes
     private Text[] rowBfvTexts = new Text[NUM_ROBOTS];
+
+    // Per-column readout (extra lines below the column label) — top BFVs that robot is seen
+    // exhibiting, across every observer currently watching it
+    private Text[] colBfvTexts = new Text[NUM_ROBOTS];
 
     public bool start = false;
 
@@ -112,13 +118,13 @@ public class CRMHeatmap : MonoBehaviour
         top5Text.text      = "Top BFV: —";
         top5Text.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         top5Text.fontSize  = 10;
-        top5Text.color     = Color.yellow;
+        top5Text.color     = Color.cyan;
         top5Text.alignment = TextAnchor.MiddleCenter;
         top5Text.horizontalOverflow = HorizontalWrapMode.Overflow;
 
         float gridOffsetY = -PADDING - TITLE_ROW_HEIGHT - TOP5_ROW_HEIGHT;
 
-        // Column headers
+        // Column headers — label line (static) + BFV lines below it (updated live)
         for (int j = 0; j < NUM_ROBOTS; j++)
         {
             GameObject header = CreateUIObject($"ColHeader_CRM_{j}", panel);
@@ -127,13 +133,31 @@ public class CRMHeatmap : MonoBehaviour
             r.anchorMax        = new Vector2(0, 1);
             r.pivot            = new Vector2(0, 1);
             r.anchoredPosition = new Vector2(PADDING + ROW_LABEL_WIDTH + j * CELL_SIZE, gridOffsetY);
-            r.sizeDelta        = new Vector2(CELL_SIZE, HEADER_SIZE);
+            r.sizeDelta        = new Vector2(CELL_SIZE, COL_LABEL_ROW_HEIGHT);
             Text t = header.AddComponent<Text>();
             t.text      = $"r{j}";
             t.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             t.fontSize  = (int)FONT_SIZE;
             t.color     = Color.white;
-            t.alignment = TextAnchor.LowerCenter;
+            t.alignment = TextAnchor.MiddleCenter;
+
+            GameObject colBfv = CreateUIObject($"ColBFV_CRM_{j}", panel);
+            RectTransform cb = colBfv.GetComponent<RectTransform>();
+            cb.anchorMin        = new Vector2(0, 1);
+            cb.anchorMax        = new Vector2(0, 1);
+            cb.pivot            = new Vector2(0, 1);
+            cb.anchoredPosition = new Vector2(PADDING + ROW_LABEL_WIDTH + j * CELL_SIZE, gridOffsetY - COL_LABEL_ROW_HEIGHT);
+            cb.sizeDelta        = new Vector2(CELL_SIZE, HEADER_SIZE - COL_LABEL_ROW_HEIGHT);
+            Text cbt = colBfv.AddComponent<Text>();
+            cbt.text      = "";
+            cbt.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            cbt.fontSize  = (int)FONT_SIZE;
+            cbt.resizeTextForBestFit = true;
+            cbt.resizeTextMinSize    = 4;
+            cbt.resizeTextMaxSize    = (int)FONT_SIZE;
+            cbt.color     = Color.yellow; // matches the fleet-wide Top BFV readout
+            cbt.alignment = TextAnchor.UpperCenter;
+            colBfvTexts[j] = cbt;
         }
 
         // Row headers + cells
@@ -265,6 +289,35 @@ public class CRMHeatmap : MonoBehaviour
 
         UpdateTop5();
         UpdateRowTopBFVs();
+        UpdateColTopBFVs();
+    }
+
+    // Per column (observed robot), tally the FV indices every observer currently sees it
+    // exhibiting, and show the top few as extra lines below the column label.
+    void UpdateColTopBFVs()
+    {
+        for (int j = 0; j < NUM_ROBOTS; j++)
+        {
+            Dictionary<int, int> colTally = new();
+
+            for (int i = 0; i < NUM_ROBOTS; i++)
+            {
+                int fv = cellFvIndex[i, j];
+                if (fv < 0) continue;
+
+                colTally.TryGetValue(fv, out int count);
+                colTally[fv] = count + 1;
+            }
+
+            if (colTally.Count == 0)
+            {
+                colBfvTexts[j].text = "";
+                continue;
+            }
+
+            var top = colTally.OrderByDescending(kvp => kvp.Value).Take(COL_TOP_COUNT);
+            colBfvTexts[j].text = string.Join("\n", top.Select(kvp => $"{kvp.Key}x{kvp.Value}"));
+        }
     }
 
     // Per row (observer), tally the FV indices it currently sees across all robots it's

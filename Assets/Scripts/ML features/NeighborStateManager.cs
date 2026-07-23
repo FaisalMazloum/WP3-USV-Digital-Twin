@@ -70,13 +70,17 @@ public class NeighborStateManager : MonoBehaviour
         public float rightThrusterSpeed_initial;
         public float leftThrusterSpeed;
         public float rightThrusterSpeed;
+        public float timeStamp_initial;  // sender's publish time (sec) for the "_initial" reading
+        public float timeStamp;          // sender's publish time (sec) for the current reading
 
-        public ThrusterState(float leftThrusterSpeed, float rightThrusterSpeed)
+        public ThrusterState(float leftThrusterSpeed, float rightThrusterSpeed, float timeStamp)
         {
             this.leftThrusterSpeed_initial = leftThrusterSpeed;
             this.rightThrusterSpeed_initial = rightThrusterSpeed;
             this.leftThrusterSpeed = leftThrusterSpeed;
             this.rightThrusterSpeed = rightThrusterSpeed;
+            this.timeStamp_initial = timeStamp;
+            this.timeStamp = timeStamp;
         }
     }
 
@@ -248,11 +252,12 @@ public class NeighborStateManager : MonoBehaviour
         {
             float f1 = (float)msg.velocity[0];
             float f2 = (float)msg.velocity[1];
-    
+            float msgTime = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9f; // sender's publish time
+
             if (!allThrusterSpeeds.ContainsKey(neighborRobotID))
             {
                 // First observation: initialize with current values
-                allThrusterSpeeds[neighborRobotID] = new ThrusterState(f1, f2);
+                allThrusterSpeeds[neighborRobotID] = new ThrusterState(f1, f2, msgTime);
             }
             else
             {
@@ -260,8 +265,10 @@ public class NeighborStateManager : MonoBehaviour
                 ThrusterState ts = allThrusterSpeeds[neighborRobotID];
                 ts.leftThrusterSpeed_initial = ts.leftThrusterSpeed;   // Store previous left
                 ts.rightThrusterSpeed_initial = ts.rightThrusterSpeed; // Store previous right
+                ts.timeStamp_initial = ts.timeStamp;                   // Store previous timestamp
                 ts.leftThrusterSpeed = f1;                             // Update to new left
                 ts.rightThrusterSpeed = f2;                            // Update to new right
+                ts.timeStamp = msgTime;                                // Update to new timestamp
                 allThrusterSpeeds[neighborRobotID] = ts;               // Write back (struct is value type)
             }
 
@@ -313,9 +320,19 @@ public class NeighborStateManager : MonoBehaviour
                 float observedRobotOmega_initial = (ts.rightThrusterSpeed_initial - ts.leftThrusterSpeed_initial) / thruster_separation_cm;
                 // Debug.Log("Omega = " + observedRobotOmega + "   ||   Omega_initial = " + observedRobotOmega_initial);
 
+                // Use the actual measured time between readings (not the nominal publishInterval) so
+                // a delayed or dropped joint_state message doesn't silently skew the acceleration estimate.
+                float dt = ts.timeStamp - ts.timeStamp_initial;
+                if (dt <= 0f)
+                    dt = publishInterval; // first observation for this neighbor: no prior reading yet
+
                 // Compute angular acceleration (rad/s^2)
-                observedAngularAcceleration = (observedRobotOmega - observedRobotOmega_initial) / publishInterval;
-                maxAngularAcceleration = (max_omega * Mathf.Deg2Rad) / publishInterval;
+                observedAngularAcceleration = (observedRobotOmega - observedRobotOmega_initial) / dt;
+                maxAngularAcceleration = (2*max_omega * Mathf.Deg2Rad) / dt; // max_omega*2 due to change in direction (instead of accelerating from 0)
+
+                if (transform.root.name == "remora2" && observedRobot.name == "remora0") {
+                    Debug.Log($"Actual Ang Acc: {observedAngularAcceleration} || Max Ang Acc: {maxAngularAcceleration}");
+                }
             }
             
             // Build list of valid neighbors

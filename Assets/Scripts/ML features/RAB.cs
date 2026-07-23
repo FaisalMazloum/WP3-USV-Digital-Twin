@@ -46,8 +46,9 @@ public class RABSensor : MonoBehaviour
             Debug.LogError("No NeighborStateManager found for RAB script...");
         }
 
-        max_range = transform.lossyScale.x / 2f;
-        Debug.Log($"RAB max range = {max_range}");
+        // max_range = transform.lossyScale.x / 2f; // Get size of RAB transform
+        max_range = 10.0f;
+        Debug.Log($"RAB max range = {max_range}");  
         
         timeElapsed = 0f;
     }

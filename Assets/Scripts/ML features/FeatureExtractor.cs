@@ -35,9 +35,9 @@ public class FeatureExtractor : MonoBehaviour
         public int F1;          // (u > 50%) neighbor in range [0, 15%] of RAB max range.
         public int F2;          // (u > 50%) neighbor in range [15%, 30%] of RAB max range.
         public int F3;          // (u > 50%) traveled >= 15% of max possible distance in Wl.
-        public int F4;          // (u > 5%) changes heading target
-        public int F5;          // (u > 5%) changes heading target if neighbor in range [0, 30%] of RAB max range.
-        public int F6;          // (u > 5%) changes heading target if no neighbor in range [0, 30%] of RAB max range.
+        public int F4;          // (u > 5%) alters heading.
+        public int F5;          // (u > 5%) alters heading if neighbor in range [0, 30%] of RAB max range.
+        public int F6;          // (u > 5%) alters heading if no neighbor in range [0, 30%] of RAB max range.
         public float RUL;       // Remaining Useful Life at sample creation time
         // ============== Intermittent Fault and turn history ==============
         public bool in_dropout;
@@ -267,7 +267,7 @@ public class FeatureExtractor : MonoBehaviour
 
             // F1, F2 (initial): >= 1 count of neighbors within [0, 15] and [15, 30] % of RAB max range (10m) respectively
             bool within15 = false, within30 = false;
-            float normalizedAngularAcceleration = data.observedAngularAcceleration / data.maxAngularAcceleration;
+            float normalizedAngularAcceleration = Mathf.Abs(data.observedAngularAcceleration / data.maxAngularAcceleration);
             foreach (var neighbor in data.neighbors)
             {
                 // F1 (initial): >= 1 count of neighbors in [0, 15%] of RAB max range
@@ -435,8 +435,10 @@ public class FeatureExtractor : MonoBehaviour
                 continue; // skip if less than 10 seconds of observations.
             }
 
-            float distance_Wl = distanceTraveled_history[observedRobot].Sum(); // total distance traveled in last Wl seconds
-            float distance_Ws = distanceTraveled_history[observedRobot].Skip(Mathf.RoundToInt(k_observations * Wl / 2f)).Sum(); // total distance traveled in last Ws seconds
+            List<float> distanceHistory = distanceTraveled_history[observedRobot];
+            int Ws_observations = Mathf.RoundToInt(k_observations * Ws);
+            float distance_Wl = distanceHistory.Sum(); // total distance traveled in last Wl seconds
+            float distance_Ws = distanceHistory.Skip(Math.Max(0, distanceHistory.Count - Ws_observations)).Sum(); // total distance traveled in last Ws seconds
             float distance_Ws_normalized = distance_Ws / (Ws * max_speed * 100); // normalized distance traveled in last Ws seconds. x100 for (cm) units
 
             int k = F1_observations[observedRobot].Count();
