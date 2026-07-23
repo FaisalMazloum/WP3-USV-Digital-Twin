@@ -176,23 +176,25 @@ public class NeighborStateManager : MonoBehaviour
 
     void PublishJointState()
     {
-        // float localVelocity = Vector3.Dot(rb.velocity, transform.root.forward);
-        // float localOmega = Vector3.Dot(rb.angularVelocity, transform.root.up);
-
         // float localVelocity = _cmdSubscriber.getTargetVelocities()["linear"];     // check target linear speed
         // float localOmega = _cmdSubscriber.getTargetVelocities()["angular"] * Mathf.Deg2Rad;      // check target angular speed
         // float localVelocity = _thrustController.getTargetVelocities()["linear"];     // check target linear speed
         // float localOmega = _thrustController.getTargetVelocities()["angular"] * Mathf.Deg2Rad;      // check target angular speed
 
-        // double left_thruster_velocity = (localVelocity - (localOmega * thruster_separation / 2f)) * 100.0;  // (cm/s)
-        // double right_thruster_velocity = (localVelocity + (localOmega * thruster_separation / 2f)) * 100.0;
+        // ------------------------------- USE REAL VELOCITY AND OMEGA ------------------------------- //
+        float localVelocity = Vector3.Dot(rb.velocity, transform.root.forward);
+        float localOmega = Vector3.Dot(rb.angularVelocity, transform.root.up);
+        double left_thruster_velocity = (localVelocity - (localOmega * thruster_separation / 2f)) * 100.0;  // (cm/s)
+        double right_thruster_velocity = (localVelocity + (localOmega * thruster_separation / 2f)) * 100.0;
 
-        double left_thruster_velocity = _cmdSubscriber.getTargetVelocities()["left_thruster"];
-        double right_thruster_velocity = _cmdSubscriber.getTargetVelocities()["right_thruster"];
+        // ------------------------------- USE TARGET (subscribed) VELOCITY AND OMEGA ------------------------------- //
+        // double left_thruster_velocity = _cmdSubscriber.getTargetVelocities()["left_thruster"];
+        // double right_thruster_velocity = _cmdSubscriber.getTargetVelocities()["right_thruster"];
 
-        // if (transform.root.name == "remora0")
+        // if (transform.root.name == "remora0") {
         //     Debug.Log($"Left: {left_thruster_velocity}, Right: {right_thruster_velocity}, Seperation: {thruster_separation}");
-            // Debug.Log($"Actual Omega: {Vector3.Dot(rb.angularVelocity, transform.root.up)}, Actual Velocity: {Vector3.Dot(rb.velocity, transform.root.forward)}");
+        //     Debug.Log($"Actual Omega: {Vector3.Dot(rb.angularVelocity, transform.root.up)}, Actual Velocity: {Vector3.Dot(rb.velocity, transform.root.forward)}");
+        // }
 
         JointStateMsg jointState_msg = new JointStateMsg
         {
@@ -212,11 +214,6 @@ public class NeighborStateManager : MonoBehaviour
         };
 
         ros.Publish(publishTopic, jointState_msg);
-        
-        if(transform.root.name == "remora0")
-        {
-            LoggerFunc(0);
-        }
     }
 
     public void CreateSubscribers()
@@ -272,11 +269,10 @@ public class NeighborStateManager : MonoBehaviour
                 allThrusterSpeeds[neighborRobotID] = ts;               // Write back (struct is value type)
             }
 
-            // if(transform.root.name == "remora1")
-            if(transform.root.name == "remora1" && neighborRobotID == "remora0")
-            {
-                LoggerFunc(1, neighborRobotID);
-            }
+            // if(transform.root.name == "remora1" && neighborRobotID == "remora0")
+            // {
+            //     LoggerFunc(1, neighborRobotID);
+            // }
         }
     
         CacheNeighborState();
@@ -330,9 +326,9 @@ public class NeighborStateManager : MonoBehaviour
                 observedAngularAcceleration = (observedRobotOmega - observedRobotOmega_initial) / dt;
                 maxAngularAcceleration = (2*max_omega * Mathf.Deg2Rad) / dt; // max_omega*2 due to change in direction (instead of accelerating from 0)
 
-                if (transform.root.name == "remora2" && observedRobot.name == "remora0") {
-                    Debug.Log($"Actual Ang Acc: {observedAngularAcceleration} || Max Ang Acc: {maxAngularAcceleration}");
-                }
+                // if (transform.root.name == "remora2" && observedRobot.name == "remora0") {
+                //     Debug.Log($"Actual Ang Acc: {observedAngularAcceleration} || Max Ang Acc: {maxAngularAcceleration}");
+                // }
             }
             
             // Build list of valid neighbors
