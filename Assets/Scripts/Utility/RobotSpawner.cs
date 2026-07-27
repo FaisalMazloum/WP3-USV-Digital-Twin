@@ -5,7 +5,8 @@ using UnityEngine.Rendering.PostProcessing;
 public class RobotSpawner : MonoBehaviour
 {
 
-    Vector3 envrionment_origin = new Vector3(100f, 4f, 100f);
+    // public Vector3 envrionment_origin = new Vector3(100f, 4f, 100f);
+    public Vector3 envrionment_origin = new Vector3(100f, 4f, 100f);
 
     [Header("Spawn Configuration")]
     [Tooltip("The robot prefab to spawn")]
@@ -30,8 +31,8 @@ public class RobotSpawner : MonoBehaviour
     
     [Header("Random Spawn Settings")]
     [Tooltip("Arena size (square arena centered on robotPrefab)")]
-    public float arenaSize = 18f;
-    
+    public float arenaSize;
+
     [Tooltip("Robot diameter for collision checking")]
     public float robotDiameter = 0.45f;
     
@@ -75,6 +76,8 @@ public class RobotSpawner : MonoBehaviour
             Debug.LogError("Robot prefab not assigned in RobotSpawner!");
             return;
         }
+
+        arenaSize = 10f;
     }
     
     public void SpawnRobots()

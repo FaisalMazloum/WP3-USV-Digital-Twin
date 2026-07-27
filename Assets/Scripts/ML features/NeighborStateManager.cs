@@ -155,7 +155,7 @@ public class NeighborStateManager : MonoBehaviour
         thruster_separation = _cmdSubscriber.thruster_separation;
         max_range = rabSensor.GetMaxRange();
         max_speed = 0.3f;
-        max_omega = 90f;
+        max_omega = 20f;
     }
     
     void FixedUpdate()

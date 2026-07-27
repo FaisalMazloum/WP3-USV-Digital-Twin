@@ -90,6 +90,14 @@ public class FeatureExtractor : MonoBehaviour
 
 
     // ==============================================================================
+    //                      FAULT DETECTION PARAMETERS (TARAPORE) 
+    // ==============================================================================
+    // private float F1_threshold = 0.15f;
+    // private float F2_threshold = 0.30f;
+    private float F1_threshold = 0.15f / 2;
+    private float F2_threshold = 0.30f / 2;
+
+    // ==============================================================================
     //                                  CRM 
     // ==============================================================================
     public CRMInstance crmInstance = new CRMInstance();
@@ -217,7 +225,7 @@ public class FeatureExtractor : MonoBehaviour
                         ComputeNumericalFeatures();
                         ComputeBinaryFeatures();
                         // Debug.Log($"{Time.fixedTime} - {transform.root.name} Observation created {counter}   ||   {distanceTraveled_history.Keys.Count} keys");
-                        // PrintInterimFeatures();
+                        PrintInterimFeatures();
                         // PrintFeatures();
                     }
                     observationTimeElapsed -= ControlCycle;
@@ -266,37 +274,40 @@ public class FeatureExtractor : MonoBehaviour
 
 
             // F1, F2 (initial): >= 1 count of neighbors within [0, 15] and [15, 30] % of RAB max range (10m) respectively
-            bool within15 = false, within30 = false;
+            bool withinF1 = false, withinF2 = false;
             float normalizedAngularAcceleration = Mathf.Abs(data.observedAngularAcceleration / data.maxAngularAcceleration);
+            // Mj = normalized angular acceleration * normalized distance traveled in the Ws window ending now.
+            // Computed once per observation (not re-derived later) so old entries aren't retroactively rescaled by a later, unrelated Ws-window value.
+            float Mj = normalizedAngularAcceleration * ComputeDistanceWsNormalized(distanceTraveled_history[observedRobot]);
             foreach (var neighbor in data.neighbors)
             {
-                // F1 (initial): >= 1 count of neighbors in [0, 15%] of RAB max range
-                if (neighbor.distance <= max_range * 0.15f && !within15)
-                    within15 = true;
-                // F2 (initial): >= 1 count of neighbors in [15%, 30%] of RAB max range
-                else if (neighbor.distance > max_range * 0.15f && neighbor.distance <= max_range * 0.3f && !within30)
-                    within30 = true;
+                // F1 (initial): >= 1 count of neighbors in [0, F1_threshold%] of RAB max range
+                if (neighbor.distance <= max_range * F1_threshold && !withinF1)
+                    withinF1 = true;
+                // F2 (initial): >= 1 count of neighbors in [F1_threshold%, F2_threshold%] of RAB max range
+                else if (neighbor.distance > max_range * F1_threshold && neighbor.distance <= max_range * F2_threshold && !withinF2)
+                    withinF2 = true;
             }
 
-            if (within15 && within30)
+            if (withinF1 && withinF2)
             {
                 F1_observations[observedRobot].Add(1);
                 F2_observations[observedRobot].Add(1);
-                F5_observations[observedRobot].Add(normalizedAngularAcceleration);
+                F5_observations[observedRobot].Add(Mj);
                 F6_observations[observedRobot].Add(0);
             }
-            else if (within15 && !within30)
+            else if (withinF1 && !withinF2)
             {
                 F1_observations[observedRobot].Add(1);
                 F2_observations[observedRobot].Add(0);
-                F5_observations[observedRobot].Add(normalizedAngularAcceleration);
+                F5_observations[observedRobot].Add(Mj);
                 F6_observations[observedRobot].Add(0);
             }
-            else if (!within15 && within30)
+            else if (!withinF1 && withinF2)
             {
                 F1_observations[observedRobot].Add(0);
                 F2_observations[observedRobot].Add(1);
-                F5_observations[observedRobot].Add(normalizedAngularAcceleration);
+                F5_observations[observedRobot].Add(Mj);
                 F6_observations[observedRobot].Add(0);
             }
             else
@@ -304,11 +315,23 @@ public class FeatureExtractor : MonoBehaviour
                 F1_observations[observedRobot].Add(0);
                 F2_observations[observedRobot].Add(0);
                 F5_observations[observedRobot].Add(0);
-                F6_observations[observedRobot].Add(normalizedAngularAcceleration);
+                F6_observations[observedRobot].Add(Mj);
             }
 
-            F4_observations[observedRobot].Add(normalizedAngularAcceleration);
+            F4_observations[observedRobot].Add(Mj);
             // F4_observations[observedRobot].Add(data.maxAngularAcceleration);
+
+            // Trim to rolling Wl-second window (100 observations) — binary features are proportions over Wl, not Wc
+            if (F1_observations[observedRobot].Count > k_observations * Wl)
+                F1_observations[observedRobot].RemoveAt(0);
+            if (F2_observations[observedRobot].Count > k_observations * Wl)
+                F2_observations[observedRobot].RemoveAt(0);
+            if (F4_observations[observedRobot].Count > k_observations * Wl)
+                F4_observations[observedRobot].RemoveAt(0);
+            if (F5_observations[observedRobot].Count > k_observations * Wl)
+                F5_observations[observedRobot].RemoveAt(0);
+            if (F6_observations[observedRobot].Count > k_observations * Wl)
+                F6_observations[observedRobot].RemoveAt(0);
         }
     }
 
@@ -389,7 +412,7 @@ public class FeatureExtractor : MonoBehaviour
             float rightThrusterDistance = observedRobotKvp.Value.observedRightSpeed * ControlCycle; // in (cm)
             float totalDistance = MathF.Abs(leftThrusterDistance + rightThrusterDistance) / 2f;
             distanceTraveled_history[observedRobot].Add(totalDistance);
-            if (distanceTraveled_history[observedRobot].Count > k_observations * 10) // store 10s of data in rolling window
+            if (distanceTraveled_history[observedRobot].Count > k_observations * Wl) // store 10s of data in rolling window
                 distanceTraveled_history[observedRobot].RemoveAt(0);
 
             // if (transform.root.name == "remora1" && observedRobot.name == "remora0")
@@ -422,6 +445,13 @@ public class FeatureExtractor : MonoBehaviour
         }
     }
 
+    float ComputeDistanceWsNormalized(List<float> distanceHistory)
+    {
+        int Ws_observations = Mathf.RoundToInt(k_observations * Ws);
+        float distance_Ws = distanceHistory.Skip(Math.Max(0, distanceHistory.Count - Ws_observations)).Sum(); // total distance traveled in last Ws seconds
+        return distance_Ws / (Ws * max_speed * 100); // normalized distance traveled in last Ws seconds. x100 for (cm) units
+    }
+
     void CreateSamples()
     {
         // Create samples for robots with k_observations
@@ -436,17 +466,14 @@ public class FeatureExtractor : MonoBehaviour
             }
 
             List<float> distanceHistory = distanceTraveled_history[observedRobot];
-            int Ws_observations = Mathf.RoundToInt(k_observations * Ws);
+            int Wl_observations = Mathf.RoundToInt(k_observations * Wl);
             float distance_Wl = distanceHistory.Sum(); // total distance traveled in last Wl seconds
-            float distance_Ws = distanceHistory.Skip(Math.Max(0, distanceHistory.Count - Ws_observations)).Sum(); // total distance traveled in last Ws seconds
-            float distance_Ws_normalized = distance_Ws / (Ws * max_speed * 100); // normalized distance traveled in last Ws seconds. x100 for (cm) units
 
-            int k = F1_observations[observedRobot].Count();
             int F1_true_count = F1_observations[observedRobot].Where(n => n != 0).Count();
             int F2_true_count = F2_observations[observedRobot].Where(n => n != 0).Count();
-            int F4_true_count = F4_observations[observedRobot].Where(n => n * distance_Ws_normalized > 0.1).Count();
-            int F5_true_count = F5_observations[observedRobot].Where(n => n * distance_Ws_normalized > 0.1).Count();
-            int F6_true_count = F6_observations[observedRobot].Where(n => n * distance_Ws_normalized > 0.1).Count();
+            int F4_true_count = F4_observations[observedRobot].Count(n => n > 0.1); // n is already Mj = normalizedAngularAcceleration * distanceWsNormalized at observation time
+            int F5_true_count = F5_observations[observedRobot].Count(n => n > 0.1);
+            int F6_true_count = F6_observations[observedRobot].Count(n => n > 0.1);
 
             // ========== GET RUL FROM OBSERVED ROBOT ==========
             float rul = -1f;  // Default for non-faulty robots
@@ -491,12 +518,12 @@ public class FeatureExtractor : MonoBehaviour
                 f4_observations[observedRobot],
                 distance_Wl,
                 // Binary features
-                ((float)F1_true_count / k) > 0.5 ? 1 : 0,
-                ((float)F2_true_count / k) > 0.5 ? 1 : 0,
+                ((float)F1_true_count / Wl_observations) > 0.5 ? 1 : 0,
+                ((float)F2_true_count / Wl_observations) > 0.5 ? 1 : 0,
                 (distance_Wl > 0.15 * Wl * max_speed * 100) ? 1 : 0, // 100 for (cm) units
-                ((float)F4_true_count / k) > 0.05 ? 1 : 0,
-                ((float)F5_true_count / k) > 0.05 ? 1 : 0,
-                ((float)F6_true_count / k) > 0.05 ? 1 : 0,
+                ((float)F4_true_count / Wl_observations) > 0.05 ? 1 : 0,
+                ((float)F5_true_count / Wl_observations) > 0.05 ? 1 : 0,
+                ((float)F6_true_count / Wl_observations) > 0.05 ? 1 : 0,
                 // RUL
                 rul,
                 // Intermittend Fault and Turn History
@@ -516,12 +543,7 @@ public class FeatureExtractor : MonoBehaviour
             f3_observations[observedRobot].Clear();
             f4_observations[observedRobot].Clear();
             // distanceTraveled_history[observedRobot].Clear(); // don't clear. Instead create rolling window.
-
-            F1_observations[observedRobot].Clear();
-            F2_observations[observedRobot].Clear();
-            F4_observations[observedRobot].Clear();
-            F5_observations[observedRobot].Clear();
-            F6_observations[observedRobot].Clear();
+            // F1/F2/F4/F5/F6_observations: don't clear. Rolling Wl-second window trimmed in ComputeBinaryFeatures().
 
             // =================================================
             //             PUBLISH FEATURES TO ROS2 
@@ -631,29 +653,33 @@ public class FeatureExtractor : MonoBehaviour
     }
 
     void PrintInterimFeatures()
-    {        
-        foreach (var sampleKvp in distanceTraveled_history)
+    {
+        foreach (var robot in distanceTraveled_history.Keys)
         {
-            GameObject robot = sampleKvp.Key;
-            var features = sampleKvp.Value;
-            int observations = sampleKvp.Value.Count;
-
-            // if (robot.name == "remora0" && transform.root.name == "remora1")
-            // if (robot.name == "remora0") 
+            if (robot.name == "remora0" && transform.root.name == "remora2")
             {
-                // Debug.Log($"\n{Time.fixedTime} - observations (k = {observations}): {transform.root.name} ---> {sampleKvp.Key.name})");
-                // Debug.Log($"\n{Time.fixedTime} - Features d (n = {samples} (total {features.Sum()})): {transform.root.name} ---> {sampleKvp.Key.name}): " + string.Join("   ||   ", features));
-                Debug.Log($"\n{Time.fixedTime} - {transform.root.name} observed {sampleKvp.Key.name} (k = {observations}): \nFeatures f1: " + string.Join("   ||   ", f1_observations[robot]) +
-                    $"\nFeatures f2 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", f2_observations[robot]) +
-                    $"\nFeatures f3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", f3_observations[robot]) +
-                    $"\nFeatures f4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", f4_observations[robot]) +
-                    $"\nFeatures f5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", distanceTraveled_history[robot]));
+                List<float> distanceHistory = distanceTraveled_history[robot];
+
+                int F1_sum = F1_observations[robot].Sum();
+                int F2_sum = F2_observations[robot].Sum();
+                float F3_sum = distanceHistory.Sum(); // == distance_Wl
+                int F4_count = F4_observations[robot].Count(n => n > 0.1f);
+                int F5_count = F5_observations[robot].Count(n => n > 0.1f);
+                int F6_count = F6_observations[robot].Count(n => n > 0.1f);
+
+                Debug.Log($"{transform.root.name} observed {robot.name} bits (n = {F1_observations[robot].Count}): " +
+                    // $"\nF1 (sum = {F1_sum}): " + string.Join("", F1_observations[robot]) +
+                    // $"\nF2 (sum = {F2_sum}): " + string.Join("", F2_observations[robot]) +
+                    // $"\nF3 dist/cycle (sum = {F3_sum:F2}): " + string.Join(" ", distanceHistory.Select(v => v.ToString("F2"))) +
+                    $"\nF4 (Mj>0.1 = {F4_count}): " + string.Join("", F4_observations[robot].Select(v => (v > 0.1f) ? "1" : "0")) +
+                    $"\nF5 (Mj,F5>0.1 = {F5_count}): " + string.Join("", F5_observations[robot].Select(v => (v > 0.1f) ? "1" : "0")) +
+                    $"\nF6 (Mj,F6>0.1 = {F6_count}): " + string.Join("", F6_observations[robot].Select(v => (v > 0.1f) ? "1" : "0")));
             }
         }
     }
 
     void PrintFeatures()
-    {        
+    {
         // Debug.Log($"{transform.root.name} found " + string.Join("   ||   ", feature_list_history.Keys));
         // Debug.Log($"{transform.root.name} found {feature_list_history.Keys.Count} keys");
         foreach (var sampleKvp in feature_list_history)
@@ -663,30 +689,32 @@ public class FeatureExtractor : MonoBehaviour
             int samples = sampleKvp.Value.Count;
 
             if (features[samples - 1].f1.Count >= k_observations)
-            // if (sampleKvp.Key.name == "remora0" && features[samples - 1].f1.Count >= k_observations)
-            {
-                // Debug.Log($"\n{Time.fixedTime} - {transform.root.name} observed {sampleKvp.Key.name} (n = {samples}): \nFeatures f1: " + string.Join("   ||   ", features[samples - 1].f1) +
-                //     $"\nFeatures f2 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f2) +
-                //     $"\nFeatures f3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f3) +
-                //     $"\nFeatures f4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f4) +
-                //     $"\nFeatures f5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f5));
+            if (transform.root.name == "remora2") {
+                if (sampleKvp.Key.name == "remora0" && features[samples - 1].f1.Count >= k_observations)
+                {
+                    // Debug.Log($"\n{Time.fixedTime} - {transform.root.name} observed {sampleKvp.Key.name} (n = {samples}): \nFeatures f1: " + string.Join("   ||   ", features[samples - 1].f1) +
+                    //     $"\nFeatures f2 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f2) +
+                    //     $"\nFeatures f3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f3) +
+                    //     $"\nFeatures f4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f4) +
+                    //     $"\nFeatures f5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].f5));
 
 
-                // Debug.Log("\n" + transform.root.name + $" observed (n = {samples}): \nFeatures F1 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F1) +
-                //     $"\nFeatures F2 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F2) +
-                //     $"\nFeatures F3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F3) +
-                //     $"\nFeatures F4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F4) +
-                //     $"\nFeatures F5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F5) +
-                //     $"\nFeatures F6 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F6));
-
-                // Debug.Log($"Features f3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features.f3));
-                // Debug.Log($"Features f4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features.f4));
-                // Debug.Log($"Features f5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features.f4));
-            }
-            // else if (sampleKvp.Key.name == "remora0" && features[samples - 1].f1.Count <= k_observations)
-            else
-            {
-                Debug.LogWarning("RESET");
+                //     Debug.Log("\n" + transform.root.name + $" observed (n = {samples}): \nFeatures F1 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F1) +
+                //         $"\nFeatures F2 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F2) +
+                //         $"\nFeatures F3 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F3) +
+                //         $"\nFeatures F4 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F4) +
+                //         $"\nFeatures F5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F5) +
+                //         $"\nFeatures F6 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F6));
+                // }
+                    Debug.Log($"{transform.root.name} observed {sampleKvp.Key.name} (n = {samples}): " +
+                        string.Join(" | ", features[samples - 1].F1, features[samples - 1].F2, features[samples - 1].F3,
+                            features[samples - 1].F4, features[samples - 1].F5, features[samples - 1].F6));
+                }
+                // else if (sampleKvp.Key.name == "remora0" && features[samples - 1].f1.Count <= k_observations)
+                else
+                {
+                    Debug.LogWarning("RESET");
+                }
             }
         }
     }
