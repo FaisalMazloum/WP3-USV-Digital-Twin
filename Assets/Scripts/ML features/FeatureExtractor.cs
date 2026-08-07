@@ -92,10 +92,10 @@ public class FeatureExtractor : MonoBehaviour
     // ==============================================================================
     //                      FAULT DETECTION PARAMETERS (TARAPORE) 
     // ==============================================================================
-    // private float F1_threshold = 0.15f;
-    // private float F2_threshold = 0.30f;
-    private float F1_threshold = 0.15f / 2;
-    private float F2_threshold = 0.30f / 2;
+    private float F1_threshold = 0.15f;
+    private float F2_threshold = 0.30f;
+    // private float F1_threshold = 0.15f / 2;
+    // private float F2_threshold = 0.30f / 2;
 
     // ==============================================================================
     //                                  CRM 
@@ -124,7 +124,7 @@ public class FeatureExtractor : MonoBehaviour
     // const float Wl               = 10f * Wc;                      // Long time-window
     // const float Ws               = 5f * Wc;                       // Short time-Window
     const float Wl                  = 10f;
-    const float Ws                  = 5f;
+    const float Ws                  = Wl/2f;
     float sampleTimeElapsed;
     float observationTimeElapsed;
     public bool first_reset;

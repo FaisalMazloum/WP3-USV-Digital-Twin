@@ -679,7 +679,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbba4a9eb7138b88396243f0f6597826, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  envrionment_origin: {x: 95, y: 4, z: 95}
+  envrionment_origin: {x: 100, y: 4, z: 100}
   robotPrefab: {fileID: 413413381}
   numberOfRobots: 9
   spacing: 2
@@ -8316,7 +8316,7 @@ MonoBehaviour:
   centerOfMass: {x: 0, y: 0, z: 0}
   combinedCenterOfMass: {x: 0, y: 0, z: 0}
   useDefaultInertia: 1
-  inertiaTensor: {x: 0, y: 0.06254732, z: 0}
+  inertiaTensor: {x: 0, y: 0.06254733, z: 0}
   combinedInertiaTensor: {x: 8.973207e+11, y: 7.726411e+11, z: 1.2467963e+11}
 --- !u!114 &413413386
 MonoBehaviour:
@@ -8366,7 +8366,7 @@ Transform:
   m_GameObject: {fileID: 413413381}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 92, y: 4, z: 95}
+  m_LocalPosition: {x: 97, y: 4, z: 97.03}
   m_LocalScale: {x: 0.001, y: 0.001, z: 0.001}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -8401,7 +8401,7 @@ MonoBehaviour:
   Ki: 5
   Kd: 0.3
   integralClamp: 0.1
-  maxForce: 0.3
+  maxForce: 0.5
   print_RUL: 0
   in_dropout: 0
   robotID: remora0
@@ -28408,7 +28408,7 @@ Transform:
   m_GameObject: {fileID: 1409338545}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 100, y: 1, z: 100}
+  m_LocalPosition: {x: 105, y: 1, z: 105}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -33527,7 +33527,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d7db29d1f774901aa160957b56d97b5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  selected_pattern: 4
+  selected_pattern: 1
   robots:
   - 0
   - 1
@@ -34512,11 +34512,11 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 1206665398835971384, guid: f51226b9719e94a4ca516742b25b8e9c, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: 20
       objectReference: {fileID: 0}
     - target: {fileID: 1206665398835971384, guid: f51226b9719e94a4ca516742b25b8e9c, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: -10
       objectReference: {fileID: 0}
     - target: {fileID: 1206665398835971384, guid: f51226b9719e94a4ca516742b25b8e9c, type: 3}
       propertyPath: m_LocalPosition.z
@@ -40028,7 +40028,7 @@ MonoBehaviour:
   _manualController: {fileID: 1994622783}
   selectedFault: 6
   faulty_robots:
-  - remora0
+  - remora1
   injectFault: 0
   faultInjectionTime: -1
   showRobots: 0
@@ -43182,7 +43182,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &2112394878
 Transform:
   m_ObjectHideFlags: 0
@@ -43192,8 +43192,8 @@ Transform:
   m_GameObject: {fileID: 2112394877}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 2, z: 0}
-  m_LocalScale: {x: 20, y: 0.01, z: 10}
+  m_LocalPosition: {x: -5, y: 2, z: -5}
+  m_LocalScale: {x: 10, y: 0.01, z: 10}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1409338546}

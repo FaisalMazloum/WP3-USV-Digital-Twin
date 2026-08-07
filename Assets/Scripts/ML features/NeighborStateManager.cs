@@ -155,7 +155,7 @@ public class NeighborStateManager : MonoBehaviour
         thruster_separation = _cmdSubscriber.thruster_separation;
         max_range = rabSensor.GetMaxRange();
         max_speed = 0.3f;
-        max_omega = 20f;
+        max_omega = 90f;
     }
     
     void FixedUpdate()
@@ -324,11 +324,12 @@ public class NeighborStateManager : MonoBehaviour
 
                 // Compute angular acceleration (rad/s^2)
                 observedAngularAcceleration = (observedRobotOmega - observedRobotOmega_initial) / dt;
-                maxAngularAcceleration = (2*max_omega * Mathf.Deg2Rad) / dt; // max_omega*2 due to change in direction (instead of accelerating from 0)
+                // maxAngularAcceleration = (2*max_omega * Mathf.Deg2Rad) / dt; // max_omega*2 due to change in direction (instead of accelerating from 0)
+                maxAngularAcceleration = (max_omega * Mathf.Deg2Rad) / dt;
 
-                // if (transform.root.name == "remora2" && observedRobot.name == "remora0") {
+
+                // if (transform.root.name == "remora2" && observedRobot.name == "remora0")
                 //     Debug.Log($"Actual Ang Acc: {observedAngularAcceleration} || Max Ang Acc: {maxAngularAcceleration}");
-                // }
             }
             
             // Build list of valid neighbors

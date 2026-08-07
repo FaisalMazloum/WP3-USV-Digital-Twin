@@ -39,7 +39,7 @@ public class CmdVel_Subscriber : MonoBehaviour
     public float Ki = 5f;
     public float Kd = 0.3f;
     public float integralClamp = 0.1f;
-    public float maxForce = 0.3f;
+    public float maxForce = 0.5f;
 
     private float rightIntegral = 0f;
     private float rightPreviousError = 0f;
