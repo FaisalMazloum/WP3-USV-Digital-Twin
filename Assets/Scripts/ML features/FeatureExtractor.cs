@@ -106,6 +106,11 @@ public class FeatureExtractor : MonoBehaviour
     private Dictionary<int, int> fvCounts_pending = new Dictionary<int, int>();
     private object crmLock = new object();
 
+    // Additive hook for the danger-gated CRM extension (DangerCascadeController) — the fvCounts
+    // this cycle's CRM step ran on, so the extension doesn't have to rebuild it independently.
+    // Not used by anything in this file; purely observational.
+    public Dictionary<int, int> lastFvCounts = new Dictionary<int, int>();
+
     // Temporal accumulation — rolling window of last n CRM outputs per observed robot
     public Dictionary<GameObject, Queue<int>> crmHistory = new Dictionary<GameObject, Queue<int>>();
     public const int CRM_HISTORY_LENGTH = 9; // 9s
@@ -590,6 +595,8 @@ public class FeatureExtractor : MonoBehaviour
         // run CRM on background thread — avoids blocking main thread
         // Debug.Log($"{transform.root.name} feature_list_history keys: " + string.Join(", ", feature_list_history.Keys.Select(k => k.name)));
         // Debug.Log($"{transform.root.name} fvCounts: " + string.Join(", ", fvCounts.Select(kvp => $"FV={kvp.Key}:count={kvp.Value}")));
+
+        lastFvCounts = new Dictionary<int, int>(fvCounts);
 
         if (!crmRunning)
         {
