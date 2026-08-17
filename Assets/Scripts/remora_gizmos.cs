@@ -12,10 +12,21 @@ public class remora_gizmos : MonoBehaviour
     private NeighborStateManager neighbor_state_manager_;
     private RABSensor rab_;
     private CmdVel_Subscriber thrusters_;
+    private BlinkEmitter blink_emitter_;
 
     private ROSConnection ros_;
     private string currentPatternTopic_;
     private string currentPattern_ = "";
+
+    // ---- Blink-probe visualization state (danger_crm_implementation_brief.md, Section 6) ----
+    private bool wasProbingActive_ = false;   // IsProbing && !WindowComplete, previous frame
+    private int lastSeenBlinkCount_ = -1;
+    private float lastBlinkFlashTime_ = -10f;
+    private bool resultCaptured_ = false;     // pass/fail already latched for this probe episode
+    private bool lastProbePassed_ = false;
+    private float resultFlashStartTime_ = -10f;
+    private const float BLINK_FLASH_DURATION = 0.15f;
+    private const float RESULT_FLASH_DURATION = 1.0f;
 
 
     void Start()
@@ -39,6 +50,10 @@ public class remora_gizmos : MonoBehaviour
         thrusters_ = transform.root.GetComponentInChildren<CmdVel_Subscriber>();
         if (thrusters_)
             Debug.LogError("CmdVel Script missing on " + gameObject.name);
+
+        blink_emitter_ = transform.root.GetComponentInChildren<BlinkEmitter>();
+        if (blink_emitter_ == null)
+            Debug.LogError("BlinkEmitter missing on " + gameObject.name);
 
         ros_ = ROSConnection.GetOrCreateInstance();
         currentPatternTopic_ = $"/{transform.root.name}/current_pattern";
@@ -340,6 +355,147 @@ public class remora_gizmos : MonoBehaviour
             lineOffset++;
         }
     }
+
+
+    // =======================================================================
+    //                        CRM FAULT DETECTION (DANGER)
+    // =======================================================================
+    // Same exact output as the vanilla CRM FAULT DETECTION block above, sourced from
+    // DangerCascadeController.crmInstanceDanger instead of FeatureExtractor.crmInstance, drawn
+    // in orange in its own column so the two can be visually diffed against each other without
+    // overlapping. Reads DangerCascadeController.crmHistory, which mirrors
+    // FeatureExtractor.crmHistory's own majority-vote window exactly.
+    // if (Application.isPlaying)
+    // {
+    //     DangerCascadeController dc = transform.root.GetComponentInChildren<DangerCascadeController>();
+    //     if (dc == null || dc.featureExtractor == null || dc.finalVerdict == null || dc.crmInstanceDanger == null) return;
+
+    //     GUIStyle style = new GUIStyle();
+    //     style.fontSize  = 8;
+    //     style.fontStyle = FontStyle.Bold;
+    //     style.alignment = TextAnchor.UpperLeft;
+    //     style.normal.textColor = new Color(1.0f, 0.55f, 0.0f, 1.0f); // orange
+
+    //     // separate column, offset sideways so it never overlaps the vanilla block above
+    //     Vector3 basePos = transform.position + Vector3.forward * -0.5f + Vector3.right * 2.5f;
+
+    //     int lineOffset = 0;
+    //     foreach (var kvp in dc.finalVerdict)
+    //     {
+    //         GameObject observedRobot = kvp.Key;
+    //         if (observedRobot == null) continue;
+
+    //         // get FV index for this observed robot
+    //         var history = dc.featureExtractor.feature_list_history;
+    //         if (!history.ContainsKey(observedRobot) || history[observedRobot].Count == 0) continue;
+
+    //         FeatureExtractor.allFeatures latest = history[observedRobot][history[observedRobot].Count - 1];
+    //         int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
+    //                     (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
+
+    //         // CRM classification for this FV
+    //         int crm = dc.crmInstanceDanger.FVClassification[fvIndex];
+    //         string crmLabel = crm == 1 ? "ATK" : crm == 2 ? "TOL" : "UND";
+
+    //         // attack count in rolling window
+    //         int attackCount = 0;
+    //         if (dc.crmHistory.ContainsKey(observedRobot))
+    //             foreach (int c in dc.crmHistory[observedRobot])
+    //                 if (c == 1) attackCount++;
+
+    //         // affinity-weighted TE and TR for this FV's clone — already retained by
+    //         // CRMInstanceDanger.UpdateClassification, no need to recompute the loop.
+    //         double sumE = dc.crmInstanceDanger.sumE[fvIndex];
+    //         double sumR = dc.crmInstanceDanger.sumR[fvIndex];
+
+    //         string label =
+    //             $"r{observedRobot.name.Substring(6)} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
+    //             $"CRM={crmLabel} | TE={sumE:F1} TR={sumR:F1} | " +
+    //             $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
+
+    //         UnityEditor.Handles.Label(
+    //             basePos + Vector3.forward * (-0.3f * lineOffset),
+    //             label, style);
+
+    //         lineOffset++;
+    //     }
+    // }
+
+
+    // =======================================================================
+    //                        BLINK PROBE VISUALIZATION
+    // =======================================================================
+    // danger_crm_implementation_brief.md, Section 6. Reads this robot's OWN BlinkEmitter
+    // directly — the blink itself is ground-truth/target-intrinsic (one emitter per robot,
+    // not per-observer), so no per-observer loop is needed here, unlike the CRM blocks above.
+    //
+    // While actively probing: a small icon flashes briefly on each blink pulse (yellow), plus a
+    // live "BLINK x/N" counter. A hung robot (BlinkEmitter.simulateHang) never increments
+    // BlinksCounted, so its icon simply never lights and its counter stays frozen at 0 — the
+    // contrast with a blinking neighbor is the tell, no separate "not responding" marker.
+    //
+    // Once the probe window completes, the pass/fail result is latched once (resultCaptured_)
+    // and flashed (green/red) for RESULT_FLASH_DURATION, independent of DangerCascadeController's
+    // own read-and-reset timing on the emitter (which may zero AgreedN/BlinksCounted within about
+    // a second of WindowComplete becoming true, once some observer's ladder consumes it).
+    if (Application.isPlaying && blink_emitter_ != null)
+    {
+        bool activelyProbing = blink_emitter_.IsProbing && !blink_emitter_.WindowComplete;
+
+        // new probe episode just started -> reset per-episode tracking
+        if (activelyProbing && !wasProbingActive_)
+        {
+            lastSeenBlinkCount_ = 0;
+            resultCaptured_ = false;
+        }
+
+        Vector3 iconPos = transform.position + Vector3.up * 1.5f;
+        Vector3 textPos = transform.position + Vector3.up * 1.7f;
+
+        if (activelyProbing)
+        {
+            // detect a new blink pulse since last draw
+            if (blink_emitter_.BlinksCounted != lastSeenBlinkCount_)
+            {
+                lastBlinkFlashTime_ = Time.time;
+                lastSeenBlinkCount_ = blink_emitter_.BlinksCounted;
+            }
+
+            bool lit = (Time.time - lastBlinkFlashTime_) < BLINK_FLASH_DURATION;
+            Gizmos.color = lit ? new Color(1.0f, 1.0f, 0.3f, 1.0f) : new Color(0.3f, 0.3f, 0.1f, 0.5f);
+            Gizmos.DrawSphere(iconPos, 0.08f);
+
+            GUIStyle counterStyle = new GUIStyle();
+            counterStyle.fontSize = 8;
+            counterStyle.fontStyle = FontStyle.Bold;
+            counterStyle.alignment = TextAnchor.MiddleCenter;
+            counterStyle.normal.textColor = Color.white;
+            UnityEditor.Handles.Label(textPos, $"BLINK {blink_emitter_.BlinksCounted}/{blink_emitter_.AgreedN}", counterStyle);
+        }
+        else if (blink_emitter_.IsProbing && blink_emitter_.WindowComplete && !resultCaptured_)
+        {
+            // probe just completed this episode -> latch pass/fail once
+            lastProbePassed_ = blink_emitter_.BlinksCounted == blink_emitter_.AgreedN;
+            resultFlashStartTime_ = Time.time;
+            resultCaptured_ = true;
+        }
+
+        if (resultCaptured_ && (Time.time - resultFlashStartTime_) < RESULT_FLASH_DURATION)
+        {
+            Gizmos.color = lastProbePassed_ ? new Color(0.2f, 1.0f, 0.2f, 0.9f) : new Color(1.0f, 0.15f, 0.15f, 0.9f);
+            Gizmos.DrawSphere(iconPos, 0.15f);
+
+            GUIStyle resultStyle = new GUIStyle();
+            resultStyle.fontSize = 9;
+            resultStyle.fontStyle = FontStyle.Bold;
+            resultStyle.alignment = TextAnchor.MiddleCenter;
+            resultStyle.normal.textColor = lastProbePassed_ ? Color.green : Color.red;
+            UnityEditor.Handles.Label(textPos, lastProbePassed_ ? "PROBE PASS" : "PROBE FAIL", resultStyle);
+        }
+
+        wasProbingActive_ = activelyProbing;
+    }
+
     }
 
 

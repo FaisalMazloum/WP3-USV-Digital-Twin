@@ -5,7 +5,7 @@ public class RABSensor : MonoBehaviour
 {
     public bool print_button = false;
     private int isFaulty = 0; 
-    private float max_range = 0f;
+    public float max_range = 0f;
     private float rofs_magnitude = 0f;
     private float rofs_angle = 0f;
     private float timeElapsed;
@@ -48,7 +48,7 @@ public class RABSensor : MonoBehaviour
 
         // max_range = transform.lossyScale.x / 2f; // Get size of RAB transform
         max_range = 10.0f;
-        Debug.Log($"RAB max range = {max_range}");  
+        // Debug.Log($"RAB max range = {max_range}");  
         
         timeElapsed = 0f;
     }

@@ -682,8 +682,8 @@ MonoBehaviour:
   envrionment_origin: {x: 100, y: 4, z: 100}
   robotPrefab: {fileID: 413413381}
   numberOfRobots: 9
-  spacing: 2
-  selected_layout: 2
+  spacing: 1.4
+  selected_layout: 0
   arenaSize: 20
   robotDiameter: 0.45
   safetyMargin: 0.1
@@ -8366,7 +8366,7 @@ Transform:
   m_GameObject: {fileID: 413413381}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 97, y: 4, z: 97.03}
+  m_LocalPosition: {x: 97, y: 4, z: 100}
   m_LocalScale: {x: 0.001, y: 0.001, z: 0.001}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -10488,7 +10488,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 521902326}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4291e7ae606678050a0998eadb70c9fa, type: 3}
   m_Name: 
@@ -10502,7 +10502,7 @@ MonoBehaviour:
   postSpawnWait: 5
   ROS2Wait: 10
   stabalizePeriod: 10
-  postStartWait: 10
+  postStartCollectionWait: 0
   postFaultWait: 10
   sceneReloadWait: 5
 --- !u!4 &521902328
@@ -27632,7 +27632,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1381468436
 Transform:
   m_ObjectHideFlags: 0
@@ -28412,7 +28412,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1409338546
 Transform:
   m_ObjectHideFlags: 0
@@ -31832,8 +31832,8 @@ GameObject:
   - component: {fileID: 1609780195}
   - component: {fileID: 1609780197}
   - component: {fileID: 1609780201}
-  - component: {fileID: 1609780200}
   - component: {fileID: 1609780199}
+  - component: {fileID: 1609780200}
   - component: {fileID: 1609780198}
   m_Layer: 0
   m_Name: RAB
@@ -31942,6 +31942,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   print_button: 0
+  max_range: 0
   _neighborStateManager: {fileID: 1609780195}
   _csvExporter: {fileID: 989455816}
 --- !u!114 &1609780195
@@ -32041,18 +32042,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 49b3a0f6346d7f428a0092b80d1485a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dangerExtensionEnabled: 0
+  dangerExtensionEnabled: 1
   c: 0.2
   pi_E: 0.001
   pi_R: 0.0007
-  s1: 50
-  s2: 150
-  E_t: 400
+  investigationCap: 1
+  E_t: 2
   thetaDisc: 0.3
   maxPossibleNeighbors: 9
   clearedTagDuration: 20
-  featureExtractor: {fileID: 0}
-  faultInjector: {fileID: 0}
+  featureExtractor: {fileID: 1609780197}
+  faultInjector: {fileID: 1970658656}
   exportCSV: 0
   logStateTransitions: 0
 --- !u!1001 &1621393400
@@ -33613,7 +33613,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d7db29d1f774901aa160957b56d97b5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  selected_pattern: 1
+  selected_pattern: 4
   robots:
   - 0
   - 1
@@ -35998,7 +35998,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1793028803
 Transform:
   m_ObjectHideFlags: 0

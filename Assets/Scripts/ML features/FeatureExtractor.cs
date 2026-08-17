@@ -230,7 +230,7 @@ public class FeatureExtractor : MonoBehaviour
                         ComputeNumericalFeatures();
                         ComputeBinaryFeatures();
                         // Debug.Log($"{Time.fixedTime} - {transform.root.name} Observation created {counter}   ||   {distanceTraveled_history.Keys.Count} keys");
-                        PrintInterimFeatures();
+                        // PrintInterimFeatures();
                         // PrintFeatures();
                     }
                     observationTimeElapsed -= ControlCycle;
@@ -615,7 +615,7 @@ public class FeatureExtractor : MonoBehaviour
             crmThread.Start();
         }
 
-        PrintFeatures();
+        // PrintFeatures();
     }
 
     // ************************************ CRM ************************************
@@ -713,6 +713,7 @@ public class FeatureExtractor : MonoBehaviour
                 //         $"\nFeatures F5 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F5) +
                 //         $"\nFeatures F6 (for {sampleKvp.Key.name}): " + string.Join("   ||   ", features[samples - 1].F6));
                 // }
+                
                     Debug.Log($"{transform.root.name} observed {sampleKvp.Key.name} (n = {samples}): " +
                         string.Join(" | ", features[samples - 1].F1, features[samples - 1].F2, features[samples - 1].F3,
                             features[samples - 1].F4, features[samples - 1].F5, features[samples - 1].F6));

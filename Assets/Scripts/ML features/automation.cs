@@ -18,7 +18,7 @@ public class AutomatedDataCollection : MonoBehaviour
     [SerializeField] private float postSpawnWait;          // Wait after spawning robots (must be > 5s due to SpawnerUI internal delays)
     [SerializeField] private float ROS2Wait;              // Wait for ALL ROS2 to fully launch
     [SerializeField] private float stabalizePeriod;       // After spawning, allow period for stabalizing
-    [SerializeField] private float postStartWait;         // Wait after start collection
+    [SerializeField] private float postStartCollectionWait;         // Wait after start collection
     [SerializeField] private float postFaultWait;         // Wait after fault injection
     [SerializeField] private float sceneReloadWait;        // Wait for scene to reload
     
@@ -31,25 +31,34 @@ public class AutomatedDataCollection : MonoBehaviour
         // postSpawnWait = 5f;
         // ROS2Wait = 20f;
         // stabalizePeriod = 120f;
-        // postStartWait = 100f;
+        // postStartCollectionWait = 100f;
         // postFaultWait = 105f;
         // sceneReloadWait = 10f;
 
 // ================ VALUES FOR INTERMITTENT FAULT ================
-        initialWait = 5.5f;
+        // initialWait = 5.5f;
+        // postSpawnWait = 5f;
+        // ROS2Wait = 20f;
+        // stabalizePeriod = 0f;   // doesnt need stabalization period since it is random_walk
+        // postStartCollectionWait = 0f;     //
+        // postFaultWait = 200f;
+        // sceneReloadWait = 10f;
+
+// ================ MISC TEST ================
+        initialWait = 20f;
         postSpawnWait = 5f;
-        ROS2Wait = 20f;
-        stabalizePeriod = 0f;   // doesnt need stabalization period since it is random_walk
-        postStartWait = 0f;     //
-        postFaultWait = 200f;
-        sceneReloadWait = 10f;
+        ROS2Wait = 10f;
+        stabalizePeriod = -1f;   // doesnt need stabalization period since it is random_walk
+        postStartCollectionWait = -1f;     //
+        postFaultWait = -1f;
+        sceneReloadWait = -1f;
 
 // ================ Quick Testing ================
         // initialWait = 1.5f;
         // postSpawnWait = 5f;
         // ROS2Wait = 1f;
         // stabalizePeriod = 1f;
-        // postStartWait = 1f;
+        // postStartCollectionWait = 1f;
         // postFaultWait = 20f;
         // sceneReloadWait = 10f;
 
@@ -102,27 +111,39 @@ public class AutomatedDataCollection : MonoBehaviour
         // ===========================================
         // Step 3: Trigger start collection
         // ===========================================
-        Debug.Log("[DataCollection] Starting collection...");
-        faultInjector.SetFaultyRobot(); // Randomly select faulty robot
-        TriggerBooleanField(globalCSVExporter, "startCollection");
-        yield return new WaitForSeconds(postStartWait);
+        if(stabalizePeriod != -1f)
+        {
+            Debug.Log("[DataCollection] Starting collection...");
+            faultInjector.SetFaultyRobot(); // Randomly select faulty robot
+            TriggerBooleanField(globalCSVExporter, "startCollection");
+            yield return new WaitForSeconds(postStartCollectionWait);   
+        }
         
         // ===========================================
         // Step 4: Inject fault
         // ===========================================
-        Debug.Log("[DataCollection] Injecting fault...");
-        TriggerBooleanField(faultInjector, "injectFault");
-        yield return new WaitForSeconds(postFaultWait);
-        
-        yield return new WaitForSeconds(sceneReloadWait);
-        
-        Debug.Log($"[DataCollection] All {numberOfRuns} runs completed!");
-        
-        #if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false;
-        #endif
+        if(postStartCollectionWait != -1f)
+        {
+            Debug.Log("[DataCollection] Injecting fault...");
+            TriggerBooleanField(faultInjector, "injectFault");
+            yield return new WaitForSeconds(postFaultWait);
+            
+            yield return new WaitForSeconds(sceneReloadWait);
+            
+            Debug.Log($"[DataCollection] All {numberOfRuns} runs completed!");
+            
+            #if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+            #endif   
+        }
     }
     
+
+
+
+    // ***************************************
+    // *************** METHODS ***************
+    // ***************************************
     private void TriggerSpawnerButton()
     {
         // Access the UIDocument to simulate button click

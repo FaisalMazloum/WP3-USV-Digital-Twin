@@ -30,10 +30,20 @@ public class DangerCascadeController : MonoBehaviour
     public double pi_E = 1e-3;
     public double pi_R = 0.7e-3;
 
-    [Header("Effector cap ladder (Sections 5, 11) — must satisfy R < s1 < s2 < E_t")]
-    public double s1 = 50.0;
-    public double s2 = 150.0;
-    public double E_t = 400.0;
+    // Rough starting point only — R/E have no fixed scale (they grow from SEED_E/SEED_R=10 via
+    // repeated +10 bolus injections while a clone stays active, tempered by proliferation/death),
+    // so these must be tuned against what you actually observe for R and E in your own run (see
+    // the orange gizmo panel) rather than trusted as-is.
+    //
+    // Originally two separate rungs (s1 for PRIMED, s2 for DISCREPANCY_PASSED/PROBING), per
+    // Section 5/11 of the brief. Collapsed to one: neither ever gated a transition (those are
+    // decided by E>R, discrepancy majority, and the probe result — never by comparing E to a
+    // cap), and for the verdict, all that ever mattered was investigationCap < E_t — the specific
+    // value never changed any outcome. Two rungs bought nothing but a cosmetic staircase in the
+    // Emax column of the CSV/gizmo; not worth the extra parameter.
+    [Header("Effector cap ladder (Sections 5, 11) — must satisfy R < investigationCap < E_t")]
+    public double investigationCap = 20.0;
+    public double E_t = 60.0;
 
     [Header("Discrepancy signal (Section 4d)")]
     [Range(0f, 1f)] public float thetaDisc = 0.3f;
@@ -58,11 +68,26 @@ public class DangerCascadeController : MonoBehaviour
     public Dictionary<GameObject, bool> finalVerdict = new Dictionary<GameObject, bool>();
     public Dictionary<GameObject, RobotFaultState> currentState = new Dictionary<GameObject, RobotFaultState>();
 
+    // Mirrors FeatureExtractor.crmHistory exactly (same CRM_HISTORY_LENGTH window, same
+    // majority-vote rule) — always maintained regardless of dangerExtensionEnabled, so the
+    // disabled-extension verdict below is a true match for FeatureExtractor.isFaulty (which is
+    // majority-voted, not the raw per-cycle FVClassification), and so gizmos/tools can compare
+    // the two engines' attack-count fields directly.
+    public Dictionary<GameObject, Queue<int>> crmHistory = new Dictionary<GameObject, Queue<int>>();
+
     private class LadderEntry
     {
         public RobotFaultState state = RobotFaultState.NORMAL;
         public Queue<bool> outlierWindow = new Queue<bool>();
         public Queue<bool> discrepancyWindow = new Queue<bool>();
+
+        // Separate from discrepancyWindow above: that one is PRIMED-episode-scoped (cleared on
+        // entry, used only to decide the PRIMED -> FAULT/DISCREPANCY_PASSED transition). This one
+        // is continuous and never cleared, so the always-on Section 7 arm (which must work even
+        // for robots that never enter the ladder) is smoothed the same way vanilla CRM smooths
+        // isFaulty — a single noisy cycle can't flip the verdict on its own.
+        public Queue<bool> alwaysOnDiscrepancyWindow = new Queue<bool>();
+
         public int clearedBFV = -1;
         public float clearedTime = -1f;
     }
@@ -96,9 +121,29 @@ public class DangerCascadeController : MonoBehaviour
         if (blinkReader == null)
             Debug.LogError($"{transform.root.name}: DangerCascadeController found no BlinkReader!");
 
-        if (!(0.0 < s1 && s1 < s2 && s2 < E_t))
-            Debug.LogWarning($"{transform.root.name}: cap ladder ordering s1 < s2 < E_t is violated " +
-                $"(s1={s1}, s2={s2}, E_t={E_t}) — Section 5 assumes this strict ordering.");
+        if (!(0.0 < investigationCap && investigationCap < E_t))
+            Debug.LogWarning($"{transform.root.name}: cap ladder ordering investigationCap < E_t is " +
+                $"violated (investigationCap={investigationCap}, E_t={E_t}) — Section 5 assumes this ordering.");
+    }
+
+    // Edge-detecting featureExtractor.creatingNewSample must happen in FixedUpdate, not Update.
+    // FeatureExtractor flips that flag inside ITS OWN FixedUpdate, on the fixed-step clock — if
+    // this were polled from Update instead, a slow/dropped render frame (Editor overhead, 10
+    // robots, ROS2, physics) could let several FixedUpdate ticks elapse between two Update calls
+    // and silently skip a whole sample cycle's CRM step, which would desync CRMInstanceDanger's
+    // TE/TR from CRMInstance's (same formulas, but fed fewer bolus injections/integrations than
+    // CRMInstance received). Reading it once per FixedUpdate — the same cadence it's written on —
+    // guarantees every transition is observed.
+    void FixedUpdate()
+    {
+        if (featureExtractor == null) return;
+
+        bool nowCreating = featureExtractor.creatingNewSample;
+        if (prevCreatingNewSample && !nowCreating)
+        {
+            LaunchCrmStep();
+        }
+        prevCreatingNewSample = nowCreating;
     }
 
     void Update()
@@ -106,21 +151,11 @@ public class DangerCascadeController : MonoBehaviour
         if (featureExtractor == null) return;
 
         // Keep the engine's parameter copies in sync with the inspector every frame, so
-        // sweeping s1/s2/E_t/c/pi_E/pi_R/etc. at runtime takes effect immediately.
+        // sweeping investigationCap/E_t/c/pi_E/pi_R/etc. at runtime takes effect immediately.
         crmInstanceDanger.c = c;
         crmInstanceDanger.pi_E = pi_E;
         crmInstanceDanger.pi_R = pi_R;
         crmInstanceDanger.dangerExtensionEnabled = dangerExtensionEnabled;
-
-        // Edge-detect "a new sample (and fvCounts) just got produced this cycle" — the same
-        // sync signal GlobalCSVExporter.WaitForSyncAndStartCollection already reads off this
-        // exact field.
-        bool nowCreating = featureExtractor.creatingNewSample;
-        if (prevCreatingNewSample && !nowCreating)
-        {
-            LaunchCrmStep();
-        }
-        prevCreatingNewSample = nowCreating;
 
         if (crmResultReady)
         {
@@ -181,16 +216,39 @@ public class DangerCascadeController : MonoBehaviour
             double rawE = crmInstanceDanger.sumE[fvIndex];
             double rawR = crmInstanceDanger.sumR[fvIndex];
 
-            // ---- Extension off: mirror vanilla CRM's verdict exactly, ladder stays parked ----
+            // ---- Majority-vote history, exactly like FeatureExtractor.UpdateFaultStatus ----
+            // Maintained unconditionally (not just when the ladder is active) so it's always a
+            // valid stand-in for what vanilla CRM's isFaulty would show for this same FV stream.
+            if (!crmHistory.TryGetValue(observedRobot, out Queue<int> classificationHistory))
+            {
+                classificationHistory = new Queue<int>();
+                crmHistory[observedRobot] = classificationHistory;
+            }
+            classificationHistory.Enqueue(crmInstanceDanger.FVClassification[fvIndex]);
+            if (classificationHistory.Count > FeatureExtractor.CRM_HISTORY_LENGTH)
+                classificationHistory.Dequeue();
+
+            int attackCount = 0;
+            foreach (int cls in classificationHistory)
+                if (cls == 1) attackCount++;
+            bool majorityAttack = attackCount > FeatureExtractor.CRM_HISTORY_LENGTH / 2;
+
+            // ---- Extension off: mirror vanilla CRM's verdict exactly (majority vote, same as
+            //      FeatureExtractor.isFaulty), ladder stays parked ----
             if (!dangerExtensionEnabled)
             {
-                finalVerdict[observedRobot] = crmInstanceDanger.FVClassification[fvIndex] == 1;
+                finalVerdict[observedRobot] = majorityAttack;
                 currentState[observedRobot] = RobotFaultState.NORMAL;
                 continue;
             }
 
-            // ---- Discrepancy (Sections 4d, 7) — always on, independent of ladder state ----
+            // ---- Discrepancy (Sections 4d, 7) — always on, independent of ladder state.
+            //      Windowed/majority-voted (same 9-cycle rule as everything else) so a single
+            //      noisy cycle can't flip the verdict — this is the fix for a flickering
+            //      discrepancy signal producing a flickering verdict. ----
             float discrepancy = ComputeDiscrepancy(observedRobot);
+            EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc);
+            bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow);
 
             // ---- Emax for the CURRENT state, applied read-only to this cycle's verdict.
             //      Never written back into TE/TR — the shared clone ODE keeps integrating
@@ -198,7 +256,13 @@ public class DangerCascadeController : MonoBehaviour
             double Emax = GetEmaxForState(ladder.state, rawR);
             double clampedE = Math.Min(rawE, Emax);
             bool ladderFault = clampedE > E_t;
-            bool verdict = (discrepancy > thetaDisc) || ladderFault; // Section 7 final verdict
+
+            // Section 5 is explicit that FAULT must "populate heatmap as faulty" unconditionally
+            // — it's a terminal classification, not a live re-evaluated one. Everywhere else,
+            // Emax < E_t by construction (R < investigationCap < E_t), so ladderFault is
+            // structurally only ever true once FAULT has already removed the cap; the OR here is
+            // just a safety net in case that ordering is ever violated (Start() warns if so).
+            bool verdict = (ladder.state == RobotFaultState.FAULT) || discrepancyMajority || ladderFault;
 
             finalVerdict[observedRobot] = verdict;
             currentState[observedRobot] = ladder.state;
@@ -294,10 +358,11 @@ public class DangerCascadeController : MonoBehaviour
             ladders.Remove(robot);
             finalVerdict.Remove(robot);
             currentState.Remove(robot);
+            crmHistory.Remove(robot);
         }
     }
 
-    // Section 5 cap ladder — order enforced by the caller's inspector values: R < s1 < s2 < E_t
+    // Section 5 cap ladder — order enforced by the caller's inspector values: R < investigationCap < E_t
     double GetEmaxForState(RobotFaultState state, double rawR)
     {
         switch (state)
@@ -306,10 +371,9 @@ public class DangerCascadeController : MonoBehaviour
             case RobotFaultState.CLEARED:
                 return rawR;
             case RobotFaultState.PRIMED:
-                return s1;
             case RobotFaultState.DISCREPANCY_PASSED:
             case RobotFaultState.PROBING:
-                return s2;
+                return investigationCap;
             case RobotFaultState.FAULT:
             default:
                 return double.PositiveInfinity; // "Emax removed"
