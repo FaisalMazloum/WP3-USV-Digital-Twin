@@ -25,7 +25,7 @@ public class NeighborCountReporter : MonoBehaviour
 
     void Start()
     {
-        rabSensor = GetComponentInChildren<RABSensor>();
+        rabSensor = transform.root.GetComponentInChildren<RABSensor>();
         if (rabSensor == null)
         {
             Debug.LogError($"{transform.root.name}: NeighborCountReporter found no RABSensor!");

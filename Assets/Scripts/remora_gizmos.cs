@@ -13,6 +13,7 @@ public class remora_gizmos : MonoBehaviour
     private RABSensor rab_;
     private CmdVel_Subscriber thrusters_;
     private BlinkEmitter blink_emitter_;
+    private ActuatorEmitter actuator_emitter_;
 
     private ROSConnection ros_;
     private string currentPatternTopic_;
@@ -25,7 +26,8 @@ public class remora_gizmos : MonoBehaviour
     private bool resultCaptured_ = false;     // pass/fail already latched for this probe episode
     private bool lastProbePassed_ = false;
     private float resultFlashStartTime_ = -10f;
-    private const float BLINK_FLASH_DURATION = 0.15f;
+    private const float BLINK_RING_DURATION = 0.5f;    // one-shot expanding ring per blink pulse
+    private const float BLINK_RING_MAX_RADIUS = 1.0f;
     private const float RESULT_FLASH_DURATION = 1.0f;
 
 
@@ -54,6 +56,10 @@ public class remora_gizmos : MonoBehaviour
         blink_emitter_ = transform.root.GetComponentInChildren<BlinkEmitter>();
         if (blink_emitter_ == null)
             Debug.LogError("BlinkEmitter missing on " + gameObject.name);
+
+        actuator_emitter_ = transform.root.GetComponentInChildren<ActuatorEmitter>();
+        if (actuator_emitter_ == null)
+            Debug.LogError("ActuatorEmitter missing on " + gameObject.name);
 
         ros_ = ROSConnection.GetOrCreateInstance();
         currentPatternTopic_ = $"/{transform.root.name}/current_pattern";
@@ -450,7 +456,8 @@ public class remora_gizmos : MonoBehaviour
         }
 
         Vector3 iconPos = transform.position + Vector3.up * 1.5f;
-        Vector3 textPos = transform.position + Vector3.up * 1.7f;
+        // shifted off to the side and down from the old right-on-top-of-the-robot spot
+        Vector3 textPos = transform.position + Vector3.right * 1.3f + Vector3.up * 0.4f;
 
         if (activelyProbing)
         {
@@ -461,9 +468,11 @@ public class remora_gizmos : MonoBehaviour
                 lastSeenBlinkCount_ = blink_emitter_.BlinksCounted;
             }
 
-            bool lit = (Time.time - lastBlinkFlashTime_) < BLINK_FLASH_DURATION;
-            Gizmos.color = lit ? new Color(1.0f, 1.0f, 0.3f, 1.0f) : new Color(0.3f, 0.3f, 0.1f, 0.5f);
-            Gizmos.DrawSphere(iconPos, 0.08f);
+            // one-shot expanding cyan ring per blink pulse — much more noticeable than a static
+            // flashing dot, reuses the same ring-drawing technique as DrawSonarRings but as a
+            // single expand-and-fade triggered by the blink instead of a continuous loop.
+            float blinkRingElapsed = Time.time - lastBlinkFlashTime_;
+            DrawOneShotRing(transform.root.position, Color.cyan, blinkRingElapsed, BLINK_RING_DURATION, BLINK_RING_MAX_RADIUS);
 
             GUIStyle counterStyle = new GUIStyle();
             counterStyle.fontSize = 8;
@@ -496,10 +505,75 @@ public class remora_gizmos : MonoBehaviour
         wasProbingActive_ = activelyProbing;
     }
 
+
+    // =======================================================================
+    //                        ACTUATOR PROBE VISUALIZATION
+    // =======================================================================
+    // Reads this robot's own ActuatorEmitter directly, same reasoning as the blink block above
+    // (the probe is target-intrinsic, one emitter per robot, no per-observer loop needed).
+    //
+    // Continuous pulsing cyan rings (reusing DrawSonarRings' existing looping animation, not the
+    // one-shot DrawOneShotRing the blink block uses) for as long as IsProbing is true, so it's
+    // visible at a glance which robot is currently mid-actuator-test. A live text readout shows
+    // which of the 3 rotations is active plus the commanded and currently-measured rate, so you
+    // can watch tracking accuracy in real time instead of only finding out pass/fail afterward.
+    if (Application.isPlaying && actuator_emitter_ != null && actuator_emitter_.IsProbing)
+    {
+        DrawSonarRings(transform.root.position, Color.cyan, speed: 1.2f, numRings: 3, rad: 1.2f);
+
+        int rotationNumber = actuator_emitter_.CurrentRotation >= 0 ? actuator_emitter_.CurrentRotation + 1 : 3;
+
+        GUIStyle actuatorStyle = new GUIStyle();
+        actuatorStyle.fontSize = 8;
+        actuatorStyle.fontStyle = FontStyle.Bold;
+        actuatorStyle.alignment = TextAnchor.MiddleCenter;
+        actuatorStyle.normal.textColor = Color.cyan;
+
+        // opposite side from the blink counter (which sits at Vector3.right) so the two never
+        // overlap if both happen to be visible at once
+        Vector3 actuatorTextPos = transform.position + Vector3.left * 1.3f + Vector3.up * 0.4f;
+        UnityEditor.Handles.Label(actuatorTextPos,
+            $"ROT {rotationNumber}/3\ncmd: {actuator_emitter_.CommandedOmegaDeg:F1}°/s\nmeas: {actuator_emitter_.LastMeasuredOmegaDeg:F1}°/s",
+            actuatorStyle);
+    }
+
     }
 
 
 
+
+    // One-shot expanding+fading ring, triggered once per discrete event (e.g. one ring per blink
+    // pulse) — unlike DrawSonarRings below, which loops continuously on Time.time. elapsed/duration
+    // control how far through its single expand-and-fade cycle it is; draws nothing once elapsed
+    // has passed duration, so the caller just needs to track "time since the triggering event".
+    private void DrawOneShotRing(Vector3 center, Color baseColor, float elapsed, float duration, float maxRadius = 1.0f, float thickness = 0.03f, int thicknessPasses = 3)
+    {
+        if (elapsed >= duration) return;
+
+        float phase  = Mathf.Clamp01(elapsed / duration);
+        float radius = Mathf.Lerp(0.1f, maxRadius, phase);
+        float alpha  = Mathf.Lerp(1f, 0f, phase);
+
+        Gizmos.color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
+
+        int   segments  = 32;
+        float angleStep = 360f / segments;
+        for (int t = 0; t < thicknessPasses; t++)
+        {
+            float currentRad = radius + (t * thickness);
+
+            for (int s = 0; s < segments; s++)
+            {
+                float a1 = s * angleStep * Mathf.Deg2Rad;
+                float a2 = (s + 1) * angleStep * Mathf.Deg2Rad;
+
+                Vector3 p1 = center + new Vector3(Mathf.Cos(a1), 0f, Mathf.Sin(a1)) * currentRad;
+                Vector3 p2 = center + new Vector3(Mathf.Cos(a2), 0f, Mathf.Sin(a2)) * currentRad;
+
+                Gizmos.DrawLine(p1, p2);
+            }
+        }
+    }
 
     private void DrawSonarRings(Vector3 center, Color baseColor, float speed, int numRings, float rad=2.5f, float thickness = 0.02f, int thicknessPasses = 3)
     {

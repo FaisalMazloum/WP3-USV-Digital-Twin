@@ -94,8 +94,11 @@ public class DangerCascadeController : MonoBehaviour
 
     private Dictionary<GameObject, LadderEntry> ladders = new Dictionary<GameObject, LadderEntry>();
     private Dictionary<GameObject, NeighborCountReporter> neighborReporters = new Dictionary<GameObject, NeighborCountReporter>();
-    private Dictionary<GameObject, BlinkEmitter> blinkEmitters = new Dictionary<GameObject, BlinkEmitter>();
-    private BlinkReader blinkReader;
+
+    // PROBING uses the actuator/rotation probe, not the blink probe — BlinkEmitter.cs/
+    // BlinkReader.cs remain in the codebase fully functional, just unreferenced here.
+    private Dictionary<GameObject, ActuatorEmitter> actuatorEmitters = new Dictionary<GameObject, ActuatorEmitter>();
+    private ActuatorReader actuatorReader;
 
     // Background CRM thread — mirrors FeatureExtractor's own crmInstance threading, so the
     // (heavier, duplicate) RK2 integration doesn't stall the main thread.
@@ -117,9 +120,9 @@ public class DangerCascadeController : MonoBehaviour
         if (featureExtractor == null)
             Debug.LogError($"{transform.root.name}: DangerCascadeController found no FeatureExtractor!");
 
-        blinkReader = GetComponent<BlinkReader>();
-        if (blinkReader == null)
-            Debug.LogError($"{transform.root.name}: DangerCascadeController found no BlinkReader!");
+        actuatorReader = GetComponent<ActuatorReader>();
+        if (actuatorReader == null)
+            Debug.LogError($"{transform.root.name}: DangerCascadeController found no ActuatorReader!");
 
         if (!(0.0 < investigationCap && investigationCap < E_t))
             Debug.LogWarning($"{transform.root.name}: cap ladder ordering investigationCap < E_t is " +
@@ -267,7 +270,7 @@ public class DangerCascadeController : MonoBehaviour
             finalVerdict[observedRobot] = verdict;
             currentState[observedRobot] = ladder.state;
 
-            BlinkReader.ProbeResult probeResult = BlinkReader.ProbeResult.Pending;
+            ActuatorReader.ProbeResult probeResult = ActuatorReader.ProbeResult.Pending;
             RobotFaultState stateBefore = ladder.state;
 
             // ---- State machine transitions (decide state for NEXT cycle) — Section 5 ----
@@ -294,7 +297,7 @@ public class DangerCascadeController : MonoBehaviour
 
                 case RobotFaultState.DISCREPANCY_PASSED:
                 {
-                    BlinkEmitter emitter = GetBlinkEmitter(observedRobot);
+                    ActuatorEmitter emitter = GetActuatorEmitter(observedRobot);
                     if (emitter != null)
                     {
                         emitter.RequestProbe();
@@ -305,20 +308,20 @@ public class DangerCascadeController : MonoBehaviour
 
                 case RobotFaultState.PROBING:
                 {
-                    BlinkEmitter emitter = GetBlinkEmitter(observedRobot);
-                    if (emitter != null && blinkReader != null)
+                    ActuatorEmitter emitter = GetActuatorEmitter(observedRobot);
+                    if (emitter != null && actuatorReader != null)
                     {
-                        probeResult = blinkReader.ReadResult(emitter);
-                        if (probeResult == BlinkReader.ProbeResult.Pass)
+                        probeResult = actuatorReader.ReadResult(emitter);
+                        if (probeResult == ActuatorReader.ProbeResult.Pass)
                         {
                             ladder.state = RobotFaultState.CLEARED;
                             ladder.clearedBFV = fvIndex;
                             ladder.clearedTime = Time.time;
                             emitter.ResetProbe();
                         }
-                        else if (probeResult == BlinkReader.ProbeResult.Fail)
+                        else if (probeResult == ActuatorReader.ProbeResult.Fail)
                         {
-                            ladder.state = RobotFaultState.FAULT; // software hang
+                            ladder.state = RobotFaultState.FAULT; // failed actuator test
                             emitter.ResetProbe();
                         }
                         // Pending: probe still running, stay in PROBING.
@@ -394,12 +397,12 @@ public class DangerCascadeController : MonoBehaviour
         return Mathf.Abs(selfReported - trueCount) / (float)maxPossibleNeighbors;
     }
 
-    BlinkEmitter GetBlinkEmitter(GameObject observedRobot)
+    ActuatorEmitter GetActuatorEmitter(GameObject observedRobot)
     {
-        if (!blinkEmitters.TryGetValue(observedRobot, out BlinkEmitter emitter))
+        if (!actuatorEmitters.TryGetValue(observedRobot, out ActuatorEmitter emitter))
         {
-            emitter = observedRobot.GetComponentInChildren<BlinkEmitter>();
-            blinkEmitters[observedRobot] = emitter;
+            emitter = observedRobot.GetComponentInChildren<ActuatorEmitter>();
+            actuatorEmitters[observedRobot] = emitter;
         }
         return emitter;
     }
@@ -422,7 +425,7 @@ public class DangerCascadeController : MonoBehaviour
     // ================================= CSV (Section 10) =================================
 
     void AppendCsvRow(GameObject observedRobot, int fvIndex, float discrepancy, RobotFaultState state,
-        double Emax, double rawE, double rawR, BlinkReader.ProbeResult probeResult, bool verdict)
+        double Emax, double rawE, double rawR, ActuatorReader.ProbeResult probeResult, bool verdict)
     {
         if (!csvHeaderWritten)
         {
@@ -454,8 +457,8 @@ public class DangerCascadeController : MonoBehaviour
             groundTruthLabel = faultInjector.selectedFault.ToString();
         }
 
-        string probeResultCsv = probeResult == BlinkReader.ProbeResult.Pass ? "PASS"
-            : probeResult == BlinkReader.ProbeResult.Fail ? "FAIL"
+        string probeResultCsv = probeResult == ActuatorReader.ProbeResult.Pass ? "PASS"
+            : probeResult == ActuatorReader.ProbeResult.Fail ? "FAIL"
             : "NA";
 
         csvBuffer.AppendLine(string.Join(",",

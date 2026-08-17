@@ -56,6 +56,15 @@ public class CmdVel_Subscriber : MonoBehaviour
     public bool in_dropout = false;
     private bool dropout_coroutine_lock = false;
 
+    // ==================== ACTUATOR PROBE OVERRIDE ====================
+    // Additive hook for the danger-gated CRM extension's actuator/rotation probe
+    // (ActuatorEmitter.cs). Same shape as the existing degradationCoeff/motor_state overrides
+    // below: FixedUpdate picks these instead of the normal cmd_vel target when active, rather
+    // than fighting incoming ROS messages after the fact. Zero behavior change when inactive.
+    private bool actuatorOverrideActive = false;
+    private float actuatorOverrideSpeed = 0f;
+    private float actuatorOverrideOmegaDeg = 0f;
+
     // public string robotID = "V3 - REMORA bot";
     public string robotID = "remora0";
     public string rosTopic;
@@ -109,8 +118,8 @@ public class CmdVel_Subscriber : MonoBehaviour
             degradationCoeff = Mathf.Clamp01(degradationCoeff);
         }
 
-        float target_velocity = desiredSpeed;
-        float target_omega = desiredOmega;
+        float target_velocity = actuatorOverrideActive ? actuatorOverrideSpeed : desiredSpeed;
+        float target_omega = actuatorOverrideActive ? actuatorOverrideOmegaDeg : desiredOmega;
         float target_omega_rad = target_omega * Mathf.Deg2Rad;
 
         float v_right_target = target_velocity + (target_omega_rad * thruster_separation) / 2f;
@@ -187,6 +196,33 @@ public class CmdVel_Subscriber : MonoBehaviour
     /* ===================================================== */
     /* ======================== API ======================== */
     /* ===================================================== */
+
+    /* ============ ACTUATOR PROBE OVERRIDE API (danger-gated CRM extension) ============ */
+
+    /// <summary>
+    /// Overrides the normal cmd_vel-driven target with a stationary rotation at the given
+    /// deg/s (speed forced to 0), ignoring incoming ROS messages until EndActuatorOverride() is
+    /// called. Still passes through the existing degradation/motor-state multipliers below, so a
+    /// robot with an active motor fault will genuinely fail to achieve the commanded rate.
+    /// </summary>
+    public void BeginActuatorOverride(float omegaDegPerSec)
+    {
+        actuatorOverrideActive = true;
+        actuatorOverrideSpeed = 0f;
+        actuatorOverrideOmegaDeg = omegaDegPerSec;
+    }
+
+    /// <summary> Ends the actuator probe override — control reverts to the latest cmd_vel target. </summary>
+    public void EndActuatorOverride()
+    {
+        actuatorOverrideActive = false;
+    }
+
+    /// <summary> Real achieved body angular velocity about the up axis (deg/s) — ground truth, for verifying an actuator probe. </summary>
+    public float GetActualOmegaDegPerSec()
+    {
+        return rb != null ? Vector3.Dot(rb.angularVelocity, transform.up) * Mathf.Rad2Deg : 0f;
+    }
 
     /// <summary> Sets the left and right motor states, i.e., turn ON (if 1) the motor. </summary>
     public void SetMotorStates(int leftMotorState = 0, int rightMotorState = 0)
