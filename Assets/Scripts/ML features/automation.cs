@@ -45,9 +45,9 @@ public class AutomatedDataCollection : MonoBehaviour
         // sceneReloadWait = 10f;
 
 // ================ MISC TEST ================
-        initialWait = 20f;
+        initialWait = 10f;
         postSpawnWait = 5f;
-        ROS2Wait = 10f;
+        ROS2Wait = 5f;
         stabalizePeriod = -1f;   // doesnt need stabalization period since it is random_walk
         postStartCollectionWait = -1f;     //
         postFaultWait = -1f;

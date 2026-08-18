@@ -31,7 +31,7 @@ using System.Collections;
 /// interrupts whatever the normal ros2swarm behaviour was commanding, and hands control back once
 /// the probe completes.
 /// </summary>
-public class ActuatorEmitter : MonoBehaviour
+public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
 {
     // Rough starting point only, anchored to the one existing empirical assumption about this
     // hull's angular range in the codebase: NeighborStateManager.max_omega = 90 deg/s. Kept

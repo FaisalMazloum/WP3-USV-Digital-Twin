@@ -5,19 +5,17 @@ using UnityEngine;
 /// probe verdict (danger_crm_implementation_brief.md, Section 6). Ground truth for now —
 /// counts exactly what BlinkEmitter reports; latency/lag-based counting is a later extension.
 /// </summary>
-public class BlinkReader : MonoBehaviour
+public class BlinkReader : MonoBehaviour, IProbeReader
 {
-    public enum ProbeResult { Pending, Pass, Fail }
-
     /// <summary>
     /// Pending while the target's probe hasn't finished its T-second window yet.
     /// Pass only on an exact blink-count match within the window; anything else is Fail.
     /// </summary>
-    public ProbeResult ReadResult(BlinkEmitter target)
+    public ProbeResult ReadResult(IProbeEmitter target)
     {
-        if (target == null || !target.IsProbing || !target.WindowComplete)
+        if (target is not BlinkEmitter blink || !blink.IsProbing || !blink.WindowComplete)
             return ProbeResult.Pending;
 
-        return (target.BlinksCounted == target.AgreedN) ? ProbeResult.Pass : ProbeResult.Fail;
+        return (blink.BlinksCounted == blink.AgreedN) ? ProbeResult.Pass : ProbeResult.Fail;
     }
 }

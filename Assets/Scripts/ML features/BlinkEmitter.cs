@@ -11,7 +11,7 @@ using UnityEngine;
 /// reading the one shared probe episode and its one shared N — "agreement" falls out of there
 /// being a single BlinkEmitter per robot, no coordination logic needed.
 /// </summary>
-public class BlinkEmitter : MonoBehaviour
+public class BlinkEmitter : MonoBehaviour, IProbeEmitter
 {
     [Header("Blink probe parameters (Section 6)")]
     public int Nmin = 2;

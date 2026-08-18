@@ -51,7 +51,9 @@ public class CRMInstanceDanger
     // so leaving these untouched reproduces vanilla CRM bit-for-bit.
     public double pi_E                     = 1e-3;       // effector proliferation rate (was KPE const)
     public double pi_R                     = 0.7e-3;     // regulatory proliferation rate (was KPR const)
-    public double c                        = 0.20;       // cross-reactivity (was CROSS_AFFINITY const)
+    // public double c                        = 0.20;       // cross-reactivity (was CROSS_AFFINITY const)
+    public double c                        = 0.11;       // c — cross-reactivity || c=0.11 (HD > 0 is attacked for single agent)
+    // public double C                        = 0.50;       // c — cross-reactivity || c=0.50 (HD = 2 is still tolerated for single agent)
 
     private const double KDE               = 1e-6;       // effector death rate (δ)
     private const double KDR               = 1e-6;       // regulatory death rate (δ)
