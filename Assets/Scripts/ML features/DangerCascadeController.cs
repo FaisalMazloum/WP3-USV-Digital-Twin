@@ -34,7 +34,8 @@ public class DangerCascadeController : MonoBehaviour
     public ProbeType probeType = ProbeType.Actuator;
 
     [Header("CRM parameter passthrough (Section 8) — defaults match vanilla CRM's consts exactly")]
-    public double c = 0.20;
+    // public double c = 0.20;
+    public double c = 0.11;
     public double pi_E = 1e-3;
     public double pi_R = 0.7e-3;
 
@@ -67,6 +68,10 @@ public class DangerCascadeController : MonoBehaviour
     [Header("Wiring")]
     public FeatureExtractor featureExtractor;
     public FaultInjector faultInjector; // optional — only used for the CSV ground-truth label column
+    // Optional. Leave unassigned to keep the original purely-per-observer behavior (no verdict
+    // syncing — ladder entry is always single-observer-triggered regardless). Auto-found (and
+    // retried each FixedUpdate until found) if left empty. See SwarmConsensusCoordinator.cs.
+    public SwarmConsensusCoordinator swarmConsensus;
     public bool exportCSV = false;
     public bool logStateTransitions = false; // Console.Log every ladder state change, for testing
 
@@ -96,7 +101,6 @@ public class DangerCascadeController : MonoBehaviour
         // isFaulty — a single noisy cycle can't flip the verdict on its own.
         public Queue<bool> alwaysOnDiscrepancyWindow = new Queue<bool>();
 
-        public int clearedBFV = -1;
         public float clearedTime = -1f;
     }
 
@@ -117,6 +121,8 @@ public class DangerCascadeController : MonoBehaviour
     private object crmLock = new object();
 
     private bool prevCreatingNewSample = true;
+    private float startTime;
+    private bool warnedMissingCoordinator = false;
 
     private StringBuilder csvBuffer = new StringBuilder();
     private bool csvHeaderWritten = false;
@@ -127,6 +133,11 @@ public class DangerCascadeController : MonoBehaviour
             featureExtractor = GetComponent<FeatureExtractor>();
         if (featureExtractor == null)
             Debug.LogError($"{transform.root.name}: DangerCascadeController found no FeatureExtractor!");
+
+        // swarmConsensus auto-find happens in FixedUpdate (retried until found — see there for why
+        // a one-shot attempt here isn't reliable). Optional either way — this whole feature is
+        // opt-in (see field comment above).
+        startTime = Time.time;
 
         lastProbeType = probeType;
         RefreshProbeReader();
@@ -147,6 +158,29 @@ public class DangerCascadeController : MonoBehaviour
     void FixedUpdate()
     {
         if (featureExtractor == null) return;
+
+        // Retry every cycle until found, not just once in Start() — Unity doesn't guarantee
+        // Start() ordering across GameObjects, so a robot spawned (or just initialized) before
+        // SwarmConsensusCoordinator's own Start() had run would otherwise be permanently stuck
+        // with swarmConsensus == null for the rest of the session, silently never syncing while
+        // other robots (whichever happened to initialize later) worked fine. Stops looking once
+        // found — cheap no-op afterward.
+        if (swarmConsensus == null)
+        {
+            swarmConsensus = FindObjectOfType<SwarmConsensusCoordinator>();
+            if (swarmConsensus != null && logStateTransitions)
+                Debug.Log($"{transform.root.name}: acquired SwarmConsensusCoordinator (instance {swarmConsensus.GetInstanceID()}).");
+
+            // Loud, one-time, hard-to-miss signal if there's genuinely no coordinator anywhere in
+            // the scene — rules that out directly instead of leaving it a guess.
+            if (swarmConsensus == null && !warnedMissingCoordinator && Time.time - startTime > 5f)
+            {
+                warnedMissingCoordinator = true;
+                Debug.LogWarning($"{transform.root.name}: no SwarmConsensusCoordinator found in the scene after " +
+                    "5s. Verdict syncing is OFF for this robot (falling back to purely independent behavior) — " +
+                    "add exactly one SwarmConsensusCoordinator component to a GameObject in the scene to enable it.");
+            }
+        }
 
         // probeType flipped in the inspector at runtime — pick up the new reader immediately,
         // drop the stale emitter cache (it's keyed by robot but holds references to the OLD
@@ -295,6 +329,30 @@ public class DangerCascadeController : MonoBehaviour
             EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc);
             bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow);
 
+            // ---- Adopt a swarm-wide conclusion another observer already reached, so this
+            //      observer doesn't redundantly re-run its own full investigation once the swarm
+            //      has already spoken. FAULT is terminal — never downgraded back to CLEARED by an
+            //      older broadcast once independently confirmed. No-op if swarmConsensus is unset. ----
+            if (swarmConsensus != null && ladder.state != RobotFaultState.FAULT
+                && swarmConsensus.TryGetCanonicalVerdict(observedRobot, out RobotFaultState broadcastState, out float broadcastTime))
+            {
+                if (broadcastState == RobotFaultState.FAULT)
+                {
+                    if (logStateTransitions)
+                        Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> FAULT " +
+                            $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
+                    ladder.state = RobotFaultState.FAULT;
+                }
+                else if (broadcastState == RobotFaultState.CLEARED && ladder.state != RobotFaultState.CLEARED)
+                {
+                    if (logStateTransitions)
+                        Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> CLEARED " +
+                            $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
+                    ladder.state = RobotFaultState.CLEARED;
+                    ladder.clearedTime = broadcastTime; // sync expiry timing across the swarm
+                }
+            }
+
             // ---- Emax for the CURRENT state, applied read-only to this cycle's verdict.
             //      Never written back into TE/TR — the shared clone ODE keeps integrating
             //      untouched, which is what lets two observers cap the same FV differently. ----
@@ -319,6 +377,9 @@ public class DangerCascadeController : MonoBehaviour
             switch (ladder.state)
             {
                 case RobotFaultState.NORMAL:
+                    // Any single observer's own sustained outlier read triggers entry — no
+                    // cross-robot majority required (reverted per your call: single-robot trigger,
+                    // swarm-wide sync only on the eventual FAULT/CLEARED conclusion, not the gate).
                     EnqueueWindow(ladder.outlierWindow, rawE > rawR);
                     if (WindowMajority(ladder.outlierWindow))
                     {
@@ -350,6 +411,10 @@ public class DangerCascadeController : MonoBehaviour
 
                 case RobotFaultState.PROBING:
                 {
+                    // Deliberately NOT calling emitter.ResetProbe() here — the result stays put on
+                    // the emitter until the next RequestProbe() overwrites it, so every observer
+                    // with a ladder in PROBING for this target can independently read the same
+                    // completed result at its own pace instead of racing to consume it first.
                     IProbeEmitter emitter = GetProbeEmitter(observedRobot);
                     if (emitter != null && probeReader != null)
                     {
@@ -357,14 +422,11 @@ public class DangerCascadeController : MonoBehaviour
                         if (probeResult == ProbeResult.Pass)
                         {
                             ladder.state = RobotFaultState.CLEARED;
-                            ladder.clearedBFV = fvIndex;
                             ladder.clearedTime = Time.time;
-                            emitter.ResetProbe();
                         }
                         else if (probeResult == ProbeResult.Fail)
                         {
                             ladder.state = RobotFaultState.FAULT; // failed probe
-                            emitter.ResetProbe();
                         }
                         // Pending: probe still running, stay in PROBING.
                     }
@@ -376,7 +438,10 @@ public class DangerCascadeController : MonoBehaviour
                     break;
 
                 case RobotFaultState.CLEARED:
-                    if (fvIndex != ladder.clearedBFV || (Time.time - ladder.clearedTime) > clearedTagDuration)
+                    // Purely time-based expiry, deliberately no BFV re-challenge (removed per your
+                    // call) — a CLEARED tag holds for the full clearedTagDuration regardless of
+                    // behavior change, for both independently-earned and adopted CLEARED alike.
+                    if ((Time.time - ladder.clearedTime) > clearedTagDuration)
                     {
                         ladder.state = RobotFaultState.NORMAL;
                         ladder.outlierWindow.Clear();
@@ -385,9 +450,21 @@ public class DangerCascadeController : MonoBehaviour
                     break;
             }
 
-            if (logStateTransitions && ladder.state != stateBefore)
-                Debug.Log($"{transform.root.name}: {observedRobot.name} ladder {stateBefore} -> {ladder.state} " +
-                    $"(E={rawE:F2}, R={rawR:F2}, discrepancy={discrepancy:F2})");
+            if (ladder.state != stateBefore)
+            {
+                if (logStateTransitions)
+                    Debug.Log($"{transform.root.name}: {observedRobot.name} ladder {stateBefore} -> {ladder.state} " +
+                        $"(E={rawE:F2}, R={rawR:F2}, discrepancy={discrepancy:F2})");
+
+                // Announce a freshly-reached conclusion so every other observer can adopt it next
+                // cycle instead of redundantly re-running its own investigation. No-op if
+                // swarmConsensus is unset.
+                if (swarmConsensus != null
+                    && (ladder.state == RobotFaultState.FAULT || ladder.state == RobotFaultState.CLEARED))
+                {
+                    swarmConsensus.BroadcastVerdict(observedRobot, ladder.state, Time.time);
+                }
+            }
 
             if (loggingActive)
                 AppendCsvRow(observedRobot, fvIndex, discrepancy, ladder.state, Emax, rawE, rawR, probeResult, verdict);

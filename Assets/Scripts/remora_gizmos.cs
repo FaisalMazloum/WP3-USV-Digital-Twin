@@ -472,7 +472,7 @@ public class remora_gizmos : MonoBehaviour
             // flashing dot, reuses the same ring-drawing technique as DrawSonarRings but as a
             // single expand-and-fade triggered by the blink instead of a continuous loop.
             float blinkRingElapsed = Time.time - lastBlinkFlashTime_;
-            DrawOneShotRing(transform.root.position, Color.cyan, blinkRingElapsed, BLINK_RING_DURATION, BLINK_RING_MAX_RADIUS);
+            DrawOneShotRing(transform.root.position + Vector3.up * 1.5f, new Color(1f,0.2f,0.2f,1f), blinkRingElapsed, BLINK_RING_DURATION, BLINK_RING_MAX_RADIUS);
 
             GUIStyle counterStyle = new GUIStyle();
             counterStyle.fontSize = 8;
@@ -519,7 +519,7 @@ public class remora_gizmos : MonoBehaviour
     // can watch tracking accuracy in real time instead of only finding out pass/fail afterward.
     if (Application.isPlaying && actuator_emitter_ != null && actuator_emitter_.IsProbing)
     {
-        DrawSonarRings(transform.root.position, Color.cyan, speed: 1.2f, numRings: 3, rad: 1.2f);
+        DrawSonarRings(transform.root.position + Vector3.up * 1.5f, new Color(1f,0.2f,0.2f,1f), speed: 1.2f, numRings: 3, rad: 1.2f);
 
         int rotationNumber = actuator_emitter_.CurrentRotation >= 0 ? actuator_emitter_.CurrentRotation + 1 : 3;
 

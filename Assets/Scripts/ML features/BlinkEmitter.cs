@@ -10,6 +10,13 @@ using UnityEngine;
 /// observers reach PROBING for the same target around the same time they all just end up
 /// reading the one shared probe episode and its one shared N — "agreement" falls out of there
 /// being a single BlinkEmitter per robot, no coordination logic needed.
+///
+/// Multi-reader safe by design: once WindowComplete is true, AgreedN/BlinksCounted stay put
+/// until the NEXT RequestProbe() call, rather than being cleared by whichever observer happens
+/// to read them first. Every observer with a ladder in PROBING for this robot can read the same
+/// completed result at its own pace. Do NOT call ResetProbe() from a normal read path — it's a
+/// manual/testing utility only, since clearing it early would race exactly the observers this
+/// design is meant to let read safely.
 /// </summary>
 public class BlinkEmitter : MonoBehaviour, IProbeEmitter
 {
@@ -31,12 +38,14 @@ public class BlinkEmitter : MonoBehaviour, IProbeEmitter
     private int blinkIndex;
 
     /// <summary>
-    /// Starts a new probe episode. No-op if a probe is already running or awaiting readout —
-    /// call ResetProbe() first once a caller has consumed WindowComplete's result.
+    /// Starts a new probe episode. No-op only while a probe is actively running
+    /// (IsProbing &amp;&amp; !WindowComplete) — once the previous episode has completed, a fresh
+    /// RequestProbe() is allowed even if no one has read the old result yet, since starting a new
+    /// episode is what naturally supersedes it.
     /// </summary>
     public void RequestProbe()
     {
-        if (IsProbing) return;
+        if (IsProbing && !WindowComplete) return;
 
         AgreedN = Random.Range(Nmin, Nmax + 1); // Uniform[Nmin, Nmax], inclusive
         BlinksCounted = 0;
@@ -47,7 +56,10 @@ public class BlinkEmitter : MonoBehaviour, IProbeEmitter
         IsProbing = true;
     }
 
-    /// <summary> Clears a consumed result so the next RequestProbe() starts a fresh episode. </summary>
+    /// <summary>
+    /// Manual/testing utility only — NOT part of the normal read path (see class docs). Forces
+    /// the result back to a blank slate immediately, instead of waiting for the next RequestProbe().
+    /// </summary>
     public void ResetProbe()
     {
         IsProbing = false;

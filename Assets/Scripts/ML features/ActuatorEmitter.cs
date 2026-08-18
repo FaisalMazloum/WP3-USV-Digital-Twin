@@ -26,6 +26,13 @@ using System.Collections;
 /// design as BlinkEmitter: whichever observer's ladder reaches PROBING for this robot calls
 /// RequestProbe(), which is idempotent, so simultaneous callers just share the one running probe.
 ///
+/// Multi-reader safe by design: once WindowComplete is true, RotationPassed stays put until the
+/// NEXT RequestProbe() call, rather than being cleared by whichever observer happens to read it
+/// first. Every observer with a ladder in PROBING for this robot can read the same completed
+/// result at its own pace. Do NOT call ResetProbe() from a normal read path — it's a
+/// manual/testing utility only, since clearing it early would race exactly the observers this
+/// design is meant to let read safely.
+///
 /// Takes real control of the robot's thrusters via CmdVel_Subscriber.BeginActuatorOverride /
 /// EndActuatorOverride for the probe's duration — unlike the blink probe, this genuinely
 /// interrupts whatever the normal ros2swarm behaviour was commanding, and hands control back once
@@ -71,12 +78,14 @@ public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
     }
 
     /// <summary>
-    /// Starts a new probe episode. No-op if a probe is already running or awaiting readout —
-    /// call ResetProbe() first once a caller has consumed WindowComplete's result.
+    /// Starts a new probe episode. No-op only while a probe is actively running
+    /// (IsProbing &amp;&amp; !WindowComplete) — once the previous episode has completed, a fresh
+    /// RequestProbe() is allowed even if no one has read the old result yet, since starting a new
+    /// episode is what naturally supersedes it.
     /// </summary>
     public void RequestProbe()
     {
-        if (IsProbing) return;
+        if (IsProbing && !WindowComplete) return;
 
         IsProbing = true;
         WindowComplete = false;
@@ -85,7 +94,10 @@ public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
         StartCoroutine(RunProbe());
     }
 
-    /// <summary> Clears a consumed result so the next RequestProbe() starts a fresh episode. </summary>
+    /// <summary>
+    /// Manual/testing utility only — NOT part of the normal read path (see class docs). Forces
+    /// the result back to a blank slate immediately, instead of waiting for the next RequestProbe().
+    /// </summary>
     public void ResetProbe()
     {
         IsProbing = false;
