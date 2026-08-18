@@ -21,6 +21,8 @@ public class FaultInjector : MonoBehaviour
         Bact,   // Fixed.  Both actuaotors are off.
         GradualMotor,
         IntermittentMotor,
+        RAB_discrepancy,   // RAB reports 0 detected neighbours to self; true count (via GetTrueNeighborCount) unaffected.
+        BACT_discrepancy,  // Both actuators off, like Bact — but cmd_vel intent keeps updating normally, so intent vs actually-observed motion diverges.
         None
     }
 
@@ -67,6 +69,7 @@ public class FaultInjector : MonoBehaviour
                 {
                     case FaultType.Lact:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates(1, 0);
                         _manualController.SetMotorStates(1, 0);
@@ -76,6 +79,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Ract:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates(0, 1);
                         _manualController.SetMotorStates(0, 1);
@@ -85,6 +89,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Bact:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates(1, 1);
                         _manualController.SetMotorStates(1, 1);
@@ -94,6 +99,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Rofs:
                         _FaultyRabSensor.SetRABState(1);
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates();
                         _manualController.SetMotorStates();
@@ -103,6 +109,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Pmin:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState(1, "Pmin");
                         _manualController.SetMotorStates();
                         _manualController.SetMotorStates();
@@ -112,6 +119,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Pmax:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState(1, "Pmax");
                         _manualController.SetMotorStates();
                         _manualController.SetMotorStates();
@@ -121,6 +129,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.Prnd:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState(1, "Prnd");
                         _manualController.SetMotorStates();
                         _manualController.SetMotorStates();
@@ -130,6 +139,7 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.GradualMotor:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates();
 
@@ -144,13 +154,44 @@ public class FaultInjector : MonoBehaviour
 
                     case FaultType.IntermittentMotor:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates();
                         _AdaptiveSamplingPattern.EnableIntermittentFault();
                         break;
 
+                    case FaultType.RAB_discrepancy:
+                        // Real physical fault: this robot's own RAB self-report reads 0 detected
+                        // neighbours (GetSelfReportedNeighborCount()), while GetDetections() (used
+                        // for all real feature computation) and GetTrueNeighborCount() (what
+                        // neighbours use to see the truth) are both untouched.
+                        _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault(1);
+                        _FaultyRemoraLidar.SetSensorState();
+                        _manualController.SetMotorStates();
+                        _manualController.SetMotorStates();
+                        _FaultyActuators.SetMotorStates();
+                        _FaultyActuators.SetMotorStates();
+                        break;
+
+                    case FaultType.BACT_discrepancy:
+                        // Real physical fault, same motor-off effect as Bact — but unlike Bact,
+                        // the point is the leftover discrepancy: CmdVel_Subscriber.GetIntentVelocities()
+                        // keeps reporting normal commanded intent (untouched by the motor-state
+                        // fault) while the robot doesn't actually move, so a neighbour comparing
+                        // intent against real observed motion sees the mismatch.
+                        _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
+                        _FaultyRemoraLidar.SetSensorState();
+                        _manualController.SetMotorStates(1, 1);
+                        _manualController.SetMotorStates(1, 1);
+                        _FaultyActuators.SetMotorStates(1, 1);
+                        _FaultyActuators.SetMotorStates(1, 1);
+                        break;
+
                     default:
                         _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
                         _FaultyRemoraLidar.SetSensorState();
                         _manualController.SetMotorStates();
                         _manualController.SetMotorStates();

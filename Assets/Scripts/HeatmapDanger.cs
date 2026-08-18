@@ -279,11 +279,19 @@ public class HeatmapDanger : MonoBehaviour
                 int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
                               (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
 
-                if (controller.finalVerdict.TryGetValue(observedRobot, out bool faulty))
-                    cells[observerIdx, j].color = faulty ? Color.red : new Color(0.3f, 0.8f, 0.3f, 1f);
+                bool hasState = controller.currentState.TryGetValue(observedRobot, out var state);
 
-                string stateText = controller.currentState.TryGetValue(observedRobot, out var state)
-                    ? state.ToString() : "";
+                if (controller.finalVerdict.TryGetValue(observedRobot, out bool faulty))
+                {
+                    if (faulty)
+                        cells[observerIdx, j].color = Color.red;
+                    else if (hasState && IsUnderInvestigation(state))
+                        cells[observerIdx, j].color = new Color(1.0f, 0.6f, 0.0f, 1f); // orange
+                    else
+                        cells[observerIdx, j].color = new Color(0.3f, 0.8f, 0.3f, 1f); // green
+                }
+
+                string stateText = hasState ? state.ToString() : "";
                 cellTexts[observerIdx, j].text = $"{bits}\n{fvIndex}\n{stateText}";
                 cellFvIndex[observerIdx, j]    = fvIndex;
             }
@@ -376,6 +384,16 @@ public class HeatmapDanger : MonoBehaviour
 
         var top5 = fvTally.OrderByDescending(kvp => kvp.Value).Take(TOP5_COUNT);
         top5Text.text = "Top BFV: " + string.Join("   ", top5.Select(kvp => $"{kvp.Key} (x{kvp.Value})"));
+    }
+
+    // PRIMED/DISCREPANCY_PASSED/PROBING are the ladder's investigation states — not yet
+    // classified either way. Colored separately from the red (faulty)/green (cleared/normal)
+    // verdict so mid-investigation is visually distinct rather than defaulting to green.
+    static bool IsUnderInvestigation(DangerCascadeController.RobotFaultState state)
+    {
+        return state == DangerCascadeController.RobotFaultState.PRIMED
+            || state == DangerCascadeController.RobotFaultState.DISCREPANCY_PASSED
+            || state == DangerCascadeController.RobotFaultState.PROBING;
     }
 
     GameObject CreateUIObject(string name, GameObject parent)

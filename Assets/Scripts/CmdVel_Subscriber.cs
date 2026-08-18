@@ -224,6 +224,32 @@ public class CmdVel_Subscriber : MonoBehaviour
         return rb != null ? Vector3.Dot(rb.angularVelocity, transform.up) * Mathf.Rad2Deg : 0f;
     }
 
+    /// <summary>
+    /// Real, instantaneous per-thruster speed (cm/s), ground truth — same differential-drive math
+    /// NeighborStateManager.PublishJointState() uses, but read directly off rb here instead of
+    /// going through a ROS publish (10Hz)/subscribe round trip. For BACT_discrepancy: compare
+    /// against GetIntentVelocities() without conflating a real actuator fault with ordinary
+    /// publish-rate/network latency.
+    /// </summary>
+    public Dictionary<string, float> GetActualThrusterSpeeds()
+    {
+        Dictionary<string, float> speeds = new Dictionary<string, float>();
+
+        if (rb == null)
+        {
+            speeds["left_thruster"] = 0f;
+            speeds["right_thruster"] = 0f;
+            return speeds;
+        }
+
+        float localVelocity = Vector3.Dot(rb.velocity, rb.transform.forward);
+        float localOmega = Vector3.Dot(rb.angularVelocity, transform.up);
+
+        speeds["left_thruster"] = (localVelocity - (localOmega * thruster_separation / 2f)) * 100f;
+        speeds["right_thruster"] = (localVelocity + (localOmega * thruster_separation / 2f)) * 100f;
+        return speeds;
+    }
+
     /// <summary> Sets the left and right motor states, i.e., turn ON (if 1) the motor. </summary>
     public void SetMotorStates(int leftMotorState = 0, int rightMotorState = 0)
     {
@@ -245,6 +271,28 @@ public class CmdVel_Subscriber : MonoBehaviour
 
         // Debug.Log($"RightSpeed: {velocities["right_thruster"]}");
         // Debug.Log($"LeftSpeed: {velocities["left_thruster"]}");
+
+        return velocities;
+    }
+
+    /// <summary>
+    /// BACT_discrepancy fault support (FaultInjector-driven): the pure commanded intent from the
+    /// latest cmd_vel message, deliberately WITHOUT the degradationCoeff/Lmotor_state/Rmotor_state
+    /// multipliers getTargetVelocities() above already applies. Represents "what this robot is
+    /// claiming it's trying to do" — unaffected by an injected motor fault, so it keeps reporting
+    /// normal intent even while the motors are actually disabled. Compare against what a neighbour
+    /// actually observes (e.g. NeighborStateManager.ObservedRobotData, sourced from real Rigidbody
+    /// velocity via PublishJointState()) to reveal the discrepancy.
+    /// </summary>
+    public Dictionary<string, float> GetIntentVelocities()
+    {
+        Dictionary<string, float> velocities = new Dictionary<string, float>();
+
+        float leftTarget = (desiredSpeed - (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
+        float rightTarget = (desiredSpeed + (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
+
+        velocities["left_thruster"] = leftTarget;
+        velocities["right_thruster"] = rightTarget;
 
         return velocities;
     }

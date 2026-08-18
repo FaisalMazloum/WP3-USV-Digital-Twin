@@ -4,11 +4,18 @@ using UnityEngine;
 public class RABSensor : MonoBehaviour
 {
     public bool print_button = false;
-    private int isFaulty = 0; 
+    private int isFaulty = 0;
     public float max_range = 0f;
     private float rofs_magnitude = 0f;
     private float rofs_angle = 0f;
     private float timeElapsed;
+
+    // RAB_discrepancy fault (danger_crm_implementation_brief.md, Section 4c, driven via
+    // FaultInjector): when active, this robot's own self-reported neighbour count reads 0 —
+    // detectedRobots itself (and GetDetections(), used everywhere else for real feature
+    // computation) is left untouched, so neighbouring robots' uncorrupted view of this robot via
+    // GetTrueNeighborCount() is unaffected. A real physical discrepancy, not a simulated proxy.
+    private bool neighborDiscrepancyFault = false;
 
     public NeighborStateManager _neighborStateManager;
     public GlobalCSVExporter _csvExporter;
@@ -126,6 +133,28 @@ public class RABSensor : MonoBehaviour
     public void SetRABState(int rab_fault = 0)
     {
         isFaulty = rab_fault;
+    }
+
+    /// <summary> Set/clear the RAB_discrepancy fault (FaultInjector-driven). </summary>
+    public void SetNeighborDiscrepancyFault(int fault = 0)
+    {
+        neighborDiscrepancyFault = fault != 0;
+    }
+
+    /// <summary>
+    /// This robot's own (corruptible) self-reported neighbour count. Reads 0 while
+    /// RAB_discrepancy is active, even though detectedRobots/GetDetections() still hold the real
+    /// detections underneath.
+    /// </summary>
+    public int GetSelfReportedNeighborCount()
+    {
+        return neighborDiscrepancyFault ? 0 : detectedRobots.Count;
+    }
+
+    /// <summary> Uncorrupted ground-truth neighbour count for this robot, independent of RAB_discrepancy. </summary>
+    public int GetTrueNeighborCount()
+    {
+        return detectedRobots.Count;
     }
 
     public float GetMaxRange()

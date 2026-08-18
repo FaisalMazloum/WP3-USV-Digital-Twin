@@ -58,6 +58,16 @@ public class DangerCascadeController : MonoBehaviour
     [Range(0f, 1f)] public float thetaDisc = 0.3f;
     public int maxPossibleNeighbors = 9; // normalization denominator — NUM_ROBOTS - 1
 
+    // Defaulted OFF: this signal blew way past its tolerance on healthy, un-faulted robots
+    // (whole heatmap read red with no fault injected) — almost certainly the intent/actual
+    // update-rate+latency gap during continuous real movement being much larger than the 30%
+    // tolerance guess covered, on top of a too-tight max_speed-only normalization basis. Flip
+    // this on once you've used the logging below to see real intentL/R vs actualL/R numbers on a
+    // known-healthy robot and picked a tolerance that actually covers it — RAB_discrepancy
+    // detection is completely unaffected either way.
+    public bool enableActuatorDiscrepancy = false;
+    [Range(0f, 1f)] public float actuatorDiscrepancyTolerance = 0.3f;
+
     // Note: Nmin/Nmax/T (Section 6) are NOT duplicated here — each robot's own BlinkEmitter
     // owns those directly, since it's the target's probe capability, not something any one
     // observer's inspector should be able to override.
@@ -105,7 +115,18 @@ public class DangerCascadeController : MonoBehaviour
     }
 
     private Dictionary<GameObject, LadderEntry> ladders = new Dictionary<GameObject, LadderEntry>();
-    private Dictionary<GameObject, NeighborCountReporter> neighborReporters = new Dictionary<GameObject, NeighborCountReporter>();
+
+    // Discrepancy signal (Section 4d) now reads directly off each target's own RABSensor
+    // (GetSelfReportedNeighborCount/GetTrueNeighborCount) — the RAB_discrepancy fault
+    // (FaultInjector) drives this for real instead of a simulated proxy toggle.
+    private Dictionary<GameObject, RABSensor> observedRabSensors = new Dictionary<GameObject, RABSensor>();
+
+    // Actuator-intent-vs-actual discrepancy (BACT_discrepancy) — compares each target's own
+    // claimed cmd_vel intent (CmdVel_Subscriber.GetIntentVelocities(), unaffected by a motor
+    // fault) against what THIS observer actually measures via its own NeighborStateManager (real
+    // Rigidbody-derived speeds, see NeighborStateManager.PublishJointState()).
+    private Dictionary<GameObject, CmdVel_Subscriber> observedCmdVelSubscribers = new Dictionary<GameObject, CmdVel_Subscriber>();
+    private NeighborStateManager neighborStateManager;
 
     // Which concrete emitter/reader PROBING drives, chosen by probeType — see IProbe.cs.
     private Dictionary<GameObject, IProbeEmitter> probeEmitters = new Dictionary<GameObject, IProbeEmitter>();
@@ -133,6 +154,11 @@ public class DangerCascadeController : MonoBehaviour
             featureExtractor = GetComponent<FeatureExtractor>();
         if (featureExtractor == null)
             Debug.LogError($"{transform.root.name}: DangerCascadeController found no FeatureExtractor!");
+
+        neighborStateManager = GetComponent<NeighborStateManager>();
+        if (neighborStateManager == null)
+            Debug.LogError($"{transform.root.name}: DangerCascadeController found no NeighborStateManager " +
+                "— actuator-intent discrepancy (BACT_discrepancy) will read as 0.");
 
         // swarmConsensus auto-find happens in FixedUpdate (retried until found — see there for why
         // a one-shot attempt here isn't reliable). Optional either way — this whole feature is
@@ -502,18 +528,75 @@ public class DangerCascadeController : MonoBehaviour
         }
     }
 
+    // Combined discrepancy signal (Section 4d/7) — the max of two independent per-target
+    // discrepancies: neighbour-count self-report (RAB_discrepancy) and actuator-intent-vs-actual
+    // (BACT_discrepancy). Either alone crossing thetaDisc is enough; this is what feeds PRIMED's
+    // window and the always-on arm.
     float ComputeDiscrepancy(GameObject observedRobot)
     {
-        if (!neighborReporters.TryGetValue(observedRobot, out NeighborCountReporter reporter))
-        {
-            reporter = observedRobot.GetComponentInChildren<NeighborCountReporter>();
-            neighborReporters[observedRobot] = reporter;
-        }
-        if (reporter == null || maxPossibleNeighbors <= 0) return 0f;
+        float neighborCountDiscrepancy = ComputeNeighborCountDiscrepancy(observedRobot);
+        float actuatorDiscrepancy = enableActuatorDiscrepancy ? ComputeActuatorDiscrepancy(observedRobot) : 0f;
+        return Mathf.Max(neighborCountDiscrepancy, actuatorDiscrepancy);
+    }
 
-        int selfReported = reporter.GetSelfReportedNeighborCount();
-        int trueCount = reporter.GetTrueNeighborCount();
+    float ComputeNeighborCountDiscrepancy(GameObject observedRobot)
+    {
+        if (!observedRabSensors.TryGetValue(observedRobot, out RABSensor rabSensor))
+        {
+            rabSensor = observedRobot.GetComponentInChildren<RABSensor>();
+            observedRabSensors[observedRobot] = rabSensor;
+        }
+        if (rabSensor == null || maxPossibleNeighbors <= 0) return 0f;
+
+        int selfReported = rabSensor.GetSelfReportedNeighborCount();
+        int trueCount = rabSensor.GetTrueNeighborCount();
         return Mathf.Abs(selfReported - trueCount) / (float)maxPossibleNeighbors;
+    }
+
+    // BACT_discrepancy: commanded intent vs. actually-achieved motion, BOTH read straight off the
+    // target's own CmdVel_Subscriber/Rigidbody (ground truth, zero ROS involvement) — deliberately
+    // NOT NeighborStateManager's ObservedRobotData, which is a 10Hz-published/subscribed value and
+    // would conflate real actuator faults with ordinary publish-rate/network latency. Normalized
+    // by the hull's max thruster speed (cm/s) so it's on a comparable scale to the neighbour-count
+    // fraction above.
+    float ComputeActuatorDiscrepancy(GameObject observedRobot)
+    {
+        if (neighborStateManager == null) return 0f;
+
+        if (!observedCmdVelSubscribers.TryGetValue(observedRobot, out CmdVel_Subscriber cmdVel))
+        {
+            cmdVel = observedRobot.GetComponentInChildren<CmdVel_Subscriber>();
+            observedCmdVelSubscribers[observedRobot] = cmdVel;
+        }
+        if (cmdVel == null) return 0f;
+
+        float maxSpeedCm = neighborStateManager.max_speed * 100f; // cm/s, matches the convention used everywhere else here
+        if (maxSpeedCm <= 0f) return 0f;
+
+        Dictionary<string, float> intent = cmdVel.GetIntentVelocities();
+        Dictionary<string, float> actual = cmdVel.GetActualThrusterSpeeds();
+        float leftDiff = Mathf.Abs(intent["left_thruster"] - actual["left_thruster"]);
+        float rightDiff = Mathf.Abs(intent["right_thruster"] - actual["right_thruster"]);
+        float maxDiff = Mathf.Max(leftDiff, rightDiff);
+
+        // Absolute slack, not relative to intent — a relative tolerance (like the active probe's
+        // toleranceFraction) breaks down when intent is near zero (e.g. commanded to sit still),
+        // which is common during ordinary passive monitoring but never happens during the active
+        // probe's fixed nonzero test rotation.
+        float toleranceCm = actuatorDiscrepancyTolerance * maxSpeedCm;
+        float excessDiff = Mathf.Max(0f, maxDiff - toleranceCm);
+        float result = excessDiff / maxSpeedCm;
+
+        // Only logs once this actually exceeds tolerance, so turning this on doesn't spam —
+        // use these real numbers to pick a tolerance that covers this robot's normal update-rate
+        // lag before flipping enableActuatorDiscrepancy on.
+        if (logStateTransitions && excessDiff > 0f)
+            Debug.Log($"{transform.root.name}: actuator discrepancy for {observedRobot.name} — " +
+                $"intent L={intent["left_thruster"]:F1} R={intent["right_thruster"]:F1} | " +
+                $"actual(ground truth) L={actual["left_thruster"]:F1} R={actual["right_thruster"]:F1} (cm/s) | " +
+                $"maxDiff={maxDiff:F1} tolerance={toleranceCm:F1} -> discrepancy={result:F3}");
+
+        return result;
     }
 
     IProbeEmitter GetProbeEmitter(GameObject observedRobot)
@@ -564,10 +647,10 @@ public class DangerCascadeController : MonoBehaviour
                 nearestTolAffinity = Math.Max(nearestTolAffinity, crmInstanceDanger.theta[fvIndex, k]);
 
         int selfReported = 0, trueCount = 0;
-        if (neighborReporters.TryGetValue(observedRobot, out NeighborCountReporter reporter) && reporter != null)
+        if (observedRabSensors.TryGetValue(observedRobot, out RABSensor rabSensor) && rabSensor != null)
         {
-            selfReported = reporter.GetSelfReportedNeighborCount();
-            trueCount = reporter.GetTrueNeighborCount();
+            selfReported = rabSensor.GetSelfReportedNeighborCount();
+            trueCount = rabSensor.GetTrueNeighborCount();
         }
 
         string groundTruthLabel = "None";
