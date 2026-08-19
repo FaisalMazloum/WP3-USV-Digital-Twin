@@ -10,7 +10,8 @@ public class RemoraLauncher : MonoBehaviour
         // Kill any existing session from previous runs
         KillExistingSession();
         
-        string scriptPath = "/home/faisal-mazloum/Desktop/remora_loop.sh";
+        // string scriptPath = "/home/faisal-mazloum/Desktop/remora_loop.sh";
+        string scriptPath = Application.dataPath + "/Scripts/Utility/Automation/remora_loop.sh";
         
         ProcessStartInfo startInfo = new ProcessStartInfo()
         {

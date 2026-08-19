@@ -160,7 +160,7 @@ public class FeatureExtractor : MonoBehaviour
 
         first_reset = false;
         max_range = neighborStateManager.max_range;
-        Debug.Log($"max rangeee: {max_range}");
+            // Debug.Log($"max rangeee: {max_range}");
         max_speed = neighborStateManager.max_speed; // 0.3 (m/s)
         sampleTimeElapsed = 0f;
         observationTimeElapsed = 0f;

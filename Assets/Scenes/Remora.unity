@@ -1451,7 +1451,6 @@ GameObject:
   m_Component:
   - component: {fileID: 102376142}
   - component: {fileID: 102376141}
-  - component: {fileID: 102376143}
   m_Layer: 0
   m_Name: CAM
   m_TagString: Untagged
@@ -1525,18 +1524,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &102376143
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 102376140}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c91c89f01aaf3d65f8caf41bb186ed02, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1001 &106404989
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -32083,7 +32070,7 @@ MonoBehaviour:
   E_t: 2
   thetaDisc: 0.3
   maxPossibleNeighbors: 9
-  actuatorToleranceCm: 5
+  actuatorTolerance: 0.1
   clearedTagDuration: 20
   featureExtractor: {fileID: 1609780197}
   faultInjector: {fileID: 1970658656}
@@ -44719,7 +44706,7 @@ MonoBehaviour:
   _simSettingsFlow: {fileID: 11400000, guid: f789753ad8d546ba8a106a661c9930cc, type: 2}
   _createShadowData: 0
   _simSettingsShadow: {fileID: 0}
-  _createClipSurfaceData: 1
+  _createClipSurfaceData: 0
   _simSettingsClipSurface: {fileID: 0}
   _defaultClippingState: 0
   _createAlbedoData: 0
@@ -44729,7 +44716,7 @@ MonoBehaviour:
   _fixFlickeringParticleInput: 0
   _enableRenderQueueSorting: 0
   _showOceanProxyPlane: 0
-  _editModeFPS: 30
+  _editModeFPS: 5
   _followSceneCamera: 1
   _heightQueries: 1
   _debug:

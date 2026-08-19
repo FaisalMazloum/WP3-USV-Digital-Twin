@@ -54,11 +54,12 @@ public class DangerCascadeController : MonoBehaviour
     [Range(0f, 1f)] public float thetaDisc = 0.3f;
     public int maxPossibleNeighbors = 9; // normalization denominator — NUM_ROBOTS - 1
 
-    // BACT_discrepancy: simple absolute per-wheel tolerance (cm/s) — |intent - actual| > this on
-    // either wheel counts as a discrepancy this cycle. Now that CmdVel_Subscriber's drive is
-    // kinematic (no PID lag), actual tracks intent essentially exactly for a healthy robot, so a
-    // flat tolerance is enough without the ratio/settle-window machinery this used to need.
-    public float actuatorToleranceCm = 5f;
+    // BACT_discrepancy: relative per-wheel tolerance — |intent - actual| / |intent| > this on
+    // either wheel counts as a discrepancy this cycle. Below actuatorIntentFloorCm, intent isn't
+    // large enough to divide by meaningfully (e.g. commanded to sit still), so that wheel is
+    // skipped for the cycle rather than letting noise/residual momentum blow up to a huge ratio.
+    public float actuatorTolerance = 0.1f;
+    const float actuatorIntentFloorCm = 1f;
 
     // Note: Nmin/Nmax/T (Section 6) are NOT duplicated here — each robot's own BlinkEmitter
     // owns those directly, since it's the target's probe capability, not something any one
@@ -532,8 +533,8 @@ public class DangerCascadeController : MonoBehaviour
     }
 
     // BACT_discrepancy: commanded intent vs. actually-achieved motion, BOTH read straight off the
-    // target's own CmdVel_Subscriber/Rigidbody (ground truth, zero ROS involvement) — plain
-    // |intent - actual| > actuatorToleranceCm per wheel.
+    // target's own CmdVel_Subscriber/Rigidbody (ground truth, zero ROS involvement) — relative
+    // per-wheel shortfall, |intent - actual| / |intent| > actuatorTolerance.
     float ComputeActuatorDiscrepancy(GameObject observedRobot)
     {
         if (!observedCmdVelSubscribers.TryGetValue(observedRobot, out CmdVel_Subscriber cmdVel))
@@ -546,9 +547,9 @@ public class DangerCascadeController : MonoBehaviour
         Dictionary<string, float> intent = cmdVel.GetIntentVelocities();
         Dictionary<string, float> actual = cmdVel.GetActualThrusterSpeeds();
 
-        float leftDiff = Mathf.Abs(intent["left_thruster"] - actual["left_thruster"]);
-        float rightDiff = Mathf.Abs(intent["right_thruster"] - actual["right_thruster"]);
-        bool exceeded = leftDiff > actuatorToleranceCm || rightDiff > actuatorToleranceCm;
+        bool leftExceeded = ExceedsRelativeTolerance(intent["left_thruster"], actual["left_thruster"]);
+        bool rightExceeded = ExceedsRelativeTolerance(intent["right_thruster"], actual["right_thruster"]);
+        bool exceeded = leftExceeded || rightExceeded;
 
         if (logStateTransitions && exceeded)
             Debug.Log($"{transform.root.name}: actuator discrepancy for {observedRobot.name} — " +
@@ -556,6 +557,15 @@ public class DangerCascadeController : MonoBehaviour
                 $"actual(ground truth) L={actual["left_thruster"]:F1} R={actual["right_thruster"]:F1} (cm/s)");
 
         return exceeded ? 1f : 0f;
+    }
+
+    // Below actuatorIntentFloorCm, intentSpeed isn't large enough to divide by meaningfully (e.g.
+    // commanded to sit still) — returns false rather than letting noise/residual momentum divide
+    // by ~0 into a huge/infinite ratio.
+    bool ExceedsRelativeTolerance(float intentSpeed, float actualSpeed)
+    {
+        if (Mathf.Abs(intentSpeed) < actuatorIntentFloorCm) return false;
+        return Mathf.Abs(intentSpeed - actualSpeed) / Mathf.Abs(intentSpeed) > actuatorTolerance;
     }
 
     ActuatorEmitter GetActuatorEmitter(GameObject observedRobot)
