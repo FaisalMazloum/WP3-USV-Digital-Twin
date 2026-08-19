@@ -1,8 +1,9 @@
 /// <summary>
 /// Danger-gated CRM extension — shared probe abstraction (danger_crm_implementation_brief.md,
-/// Section 6). Lets DangerCascadeController pick which probe mechanism (BlinkEmitter/BlinkReader,
-/// ActuatorEmitter/ActuatorReader, or any future one) drives PROBING via a single inspector
-/// dropdown, instead of being wired to one concrete type — see DangerCascadeController.ProbeType.
+/// Section 6). Common contract for every probe mechanism (BlinkEmitter/BlinkReader,
+/// ActuatorEmitter/ActuatorReader, or any future one) — DangerCascadeController dispatches and
+/// reads all of them through this interface rather than one hardcoded concrete type — PROBING
+/// dispatches/reads whichever one DangerCascadeController.probeType currently selects.
 /// </summary>
 public enum ProbeResult { Pending, Pass, Fail }
 

@@ -51,8 +51,12 @@ public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
     public float rotationDuration = 4f;     // each of the 3 attempts is held for exactly this long
     public float interRotationPause = 0.5f; // stationary gap between the 3 attempts
 
-    [Header("Hang simulation — no real actuator-fault mechanism exists in-sim, toggle manually")]
-    public bool simulateHang = false;
+    // No real "software hang" mechanism exists in-sim — FaultInjector.FaultType.SoftwareHang
+    // drives this via SetSimulatedHang() instead of a manual inspector toggle.
+    private bool simulateHang = false;
+
+    /// <summary> FaultInjector-driven (SoftwareHang fault) — see field comment above. </summary>
+    public void SetSimulatedHang(bool hang) { simulateHang = hang; }
 
     public bool IsProbing { get; private set; }
     public bool WindowComplete { get; private set; }
@@ -122,14 +126,15 @@ public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
             // simulateHang: motors don't respond to the command — the robot just keeps doing
             // whatever it was already doing, which will not match the commanded rate.
             //
-            // Sign flipped on the way to the override only: a healthy robot was empirically
-            // observed spinning at the correct speed but the opposite direction, so
-            // CmdVel_Subscriber's omega sign convention is inverted relative to this probe's.
-            // commandedOmegaDeg/CommandedOmegaDeg stay unflipped — they're the reference value
-            // the measured result gets compared/displayed against, and GetActualOmegaDegPerSec()
-            // is unaffected by this, so leaving them alone keeps that comparison correct.
+            // No sign flip here (there used to be one): that was compensating for the old
+            // force/PID-driven CmdVel_Subscriber, where the real-world rotation direction for a
+            // given target sign was an empirical fact about the physics, not something the
+            // override math guaranteed. Now that CmdVel_Subscriber drives kinematically (target
+            // omega is written straight onto rb.angularVelocity), GetActualOmegaDegPerSec() is a
+            // tautological readback of exactly what's passed in here — flipping it just makes a
+            // healthy robot fail with "right speed, wrong direction" every time.
             if (!simulateHang && cmdVel != null)
-                cmdVel.BeginActuatorOverride(-commandedOmegaDeg);
+                cmdVel.BeginActuatorOverride(commandedOmegaDeg);
 
             float omegaSum = 0f;
             int omegaSamples = 0;

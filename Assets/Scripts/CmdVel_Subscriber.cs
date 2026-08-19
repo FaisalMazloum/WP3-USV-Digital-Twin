@@ -96,7 +96,7 @@ public class CmdVel_Subscriber : MonoBehaviour
     {
         desiredSpeed = (float)msg.linear.x;
         // desiredSpeed = (float)msg.linear.x * 10f;
-        desiredOmega = -(float)msg.angular.z;
+        desiredOmega = (float)msg.angular.z;
         // Debug.Log($"Linear.x = {desiredSpeed} || Angular.z = {desiredOmega}");
     }
 
@@ -129,32 +129,65 @@ public class CmdVel_Subscriber : MonoBehaviour
         v_right_target *= degradationCoeff;
         v_left_target *= degradationCoeff;
 
-        Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
-        Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
-
-        float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
-        float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
-
-        float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
-        float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
-
         // ========== APPLY MOTOR STATE (BINARY ON/OFF) ==========
-        rightForce *= Rmotor_state;
-        leftForce *= Lmotor_state;
+        // Applied straight to the per-wheel TARGET now (used to be applied to the PID force
+        // output instead) — zeroing a faulty wheel's target here is what still makes it diverge
+        // from GetIntentVelocities() (which stays undegraded/unfaulted), so Lact/Ract/Bact/
+        // BACT_discrepancy detection is unaffected by the switch below.
+        v_right_target *= Rmotor_state;
+        v_left_target *= Lmotor_state;
 
         if (Input.GetKey(KeyCode.UpArrow)
             || Input.GetKey(KeyCode.DownArrow)
             || Input.GetKey(KeyCode.RightArrow)
             || Input.GetKey(KeyCode.LeftArrow)) return;
 
-        if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+        // =======================================================================
+        //                         KINEMATIC THRUSTER DRIVE
+        // =======================================================================
+        bool touchingWater = (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+                           || (leftWaterObject != null && leftWaterObject.IsTouchingWater());
+        if (touchingWater)
         {
-            rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
+            float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
+            float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
+
+            Vector3 currentVel = rb.velocity;
+            float currentForward = Vector3.Dot(currentVel, rb.transform.forward);
+            Vector3 residualVel = currentVel - rb.transform.forward * currentForward;
+            rb.velocity = residualVel + rb.transform.forward * bodyForwardTarget;
+
+            Vector3 currentAngVel = rb.angularVelocity;
+            float currentYaw = Vector3.Dot(currentAngVel, transform.up);
+            Vector3 residualAngVel = currentAngVel - transform.up * currentYaw;
+            rb.angularVelocity = residualAngVel + transform.up * bodyOmegaRadTarget;
         }
-        if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
-        {
-            rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
-        }
+
+
+        // =======================================================================
+        //                      FORCE BASED THRUSTER DRIVE
+        // =======================================================================
+        // ---- OLD: force-based PID drive (kept for rollback) ----
+        // Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
+        // Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
+        //
+        // float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
+        // float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
+        //
+        // float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
+        // float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
+        //
+        // rightForce *= Rmotor_state;
+        // leftForce *= Lmotor_state;
+        //
+        // if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+        // {
+        //     rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
+        // }
+        // if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
+        // {
+        //     rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
+        // }
     }
 
 
@@ -242,6 +275,12 @@ public class CmdVel_Subscriber : MonoBehaviour
             return speeds;
         }
 
+        // Scalar diff-drive formula — same convention FixedUpdate()'s kinematic drive uses to
+        // WRITE rb.velocity/rb.angularVelocity in the first place, so reading it back the same
+        // way is exact by construction. (GetPointVelocity() at each thruster's real position was
+        // tried here instead, but its true 3D cross-product geometry doesn't share this formula's
+        // sign convention, which silently swapped left/right once drive went kinematic — the
+        // scalar round-trip avoids that entirely.)
         float localVelocity = Vector3.Dot(rb.velocity, rb.transform.forward);
         float localOmega = Vector3.Dot(rb.angularVelocity, transform.up);
 
@@ -257,28 +296,10 @@ public class CmdVel_Subscriber : MonoBehaviour
         Rmotor_state = -rightMotorState + 1;
     }
 
-    public Dictionary<string, float> getTargetVelocities()
-    {
-        Dictionary<string, float> velocities = new Dictionary<string, float>();
-        // velocities["linear"] = desiredSpeed;
-        // velocities["angular"] = desiredOmega;
-
-        float leftTarget = (desiredSpeed - (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
-        float rightTarget = (desiredSpeed + (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
-
-        velocities["left_thruster"] = leftTarget * degradationCoeff * Lmotor_state;
-        velocities["right_thruster"] = rightTarget * degradationCoeff * Rmotor_state;
-
-        // Debug.Log($"RightSpeed: {velocities["right_thruster"]}");
-        // Debug.Log($"LeftSpeed: {velocities["left_thruster"]}");
-
-        return velocities;
-    }
-
     /// <summary>
     /// BACT_discrepancy fault support (FaultInjector-driven): the pure commanded intent from the
     /// latest cmd_vel message, deliberately WITHOUT the degradationCoeff/Lmotor_state/Rmotor_state
-    /// multipliers getTargetVelocities() above already applies. Represents "what this robot is
+    /// multipliers a degraded/faulty motor would apply. Represents "what this robot is
     /// claiming it's trying to do" — unaffected by an injected motor fault, so it keeps reporting
     /// normal intent even while the motors are actually disabled. Compare against what a neighbour
     /// actually observes (e.g. NeighborStateManager.ObservedRobotData, sourced from real Rigidbody
@@ -288,8 +309,15 @@ public class CmdVel_Subscriber : MonoBehaviour
     {
         Dictionary<string, float> velocities = new Dictionary<string, float>();
 
-        float leftTarget = (desiredSpeed - (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
-        float rightTarget = (desiredSpeed + (desiredOmega * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
+        // Mirror FixedUpdate()'s own target selection: while the actuator probe override is
+        // active, that override IS the real commanded intent (a stationary rotation), not the
+        // stale pre-probe cmd_vel fields — otherwise intent stays frozen on the old straight-
+        // driving command for the whole probe window while actual motion is a real turn.
+        float intentSpeed = actuatorOverrideActive ? actuatorOverrideSpeed : desiredSpeed;
+        float intentOmegaDeg = actuatorOverrideActive ? actuatorOverrideOmegaDeg : desiredOmega;
+
+        float leftTarget = (intentSpeed - (intentOmegaDeg * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
+        float rightTarget = (intentSpeed + (intentOmegaDeg * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
 
         velocities["left_thruster"] = leftTarget;
         velocities["right_thruster"] = rightTarget;

@@ -95,9 +95,22 @@ public class remora_gizmos : MonoBehaviour
 
             UnityEditor.Handles.Label(
                 transform.position + Vector3.forward * 1.2f + Vector3.right * 0f,
-                $"v={localVelocity.z:F2}m/s | w={localAngularVel.y*Mathf.Rad2Deg:F1}deg/s", 
+                $"v={localVelocity.z:F2}m/s | w={localAngularVel.y*Mathf.Rad2Deg:F1}deg/s",
                 style
             );
+
+            if (thrusters_ != null)
+            {
+                Dictionary<string, float> intent = thrusters_.GetIntentVelocities();
+                Dictionary<string, float> actual = thrusters_.GetActualThrusterSpeeds();
+
+                UnityEditor.Handles.Label(
+                    transform.position + Vector3.forward * 1.1f + Vector3.right * 0f,
+                    $"L: intent={intent["left_thruster"]:F1} true={actual["left_thruster"]:F1} | " +
+                    $"R: intent={intent["right_thruster"]:F1} true={actual["right_thruster"]:F1} cm/s",
+                    style
+                );
+            }
         }
 
 
@@ -513,11 +526,18 @@ public class remora_gizmos : MonoBehaviour
     // (the probe is target-intrinsic, one emitter per robot, no per-observer loop needed).
     //
     // Continuous pulsing cyan rings (reusing DrawSonarRings' existing looping animation, not the
-    // one-shot DrawOneShotRing the blink block uses) for as long as IsProbing is true, so it's
-    // visible at a glance which robot is currently mid-actuator-test. A live text readout shows
-    // which of the 3 rotations is active plus the commanded and currently-measured rate, so you
-    // can watch tracking accuracy in real time instead of only finding out pass/fail afterward.
-    if (Application.isPlaying && actuator_emitter_ != null && actuator_emitter_.IsProbing)
+    // one-shot DrawOneShotRing the blink block uses) for as long as a probe is actively running,
+    // so it's visible at a glance which robot is currently mid-actuator-test. A live text readout
+    // shows which of the 3 rotations is active plus the commanded and currently-measured rate, so
+    // you can watch tracking accuracy in real time instead of only finding out pass/fail
+    // afterward.
+    //
+    // IsProbing alone isn't enough — same as the blink block above, it deliberately stays true
+    // after WindowComplete (multi-observer-safe design: it only flips on the NEXT RequestProbe()),
+    // so gating on IsProbing alone left the rings pulsing forever once a robot had been probed
+    // even once, long after it went CLEARED/NORMAL.
+    bool actuatorActivelyProbing = actuator_emitter_ != null && actuator_emitter_.IsProbing && !actuator_emitter_.WindowComplete;
+    if (Application.isPlaying && actuatorActivelyProbing)
     {
         DrawSonarRings(transform.root.position + Vector3.up * 1.5f, new Color(1f,0.2f,0.2f,1f), speed: 1.2f, numRings: 3, rad: 1.2f);
 

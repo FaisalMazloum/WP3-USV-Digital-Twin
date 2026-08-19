@@ -23,6 +23,7 @@ public class FaultInjector : MonoBehaviour
         IntermittentMotor,
         RAB_discrepancy,   // RAB reports 0 detected neighbours to self; true count (via GetTrueNeighborCount) unaffected.
         BACT_discrepancy,  // Both actuators off, like Bact — but cmd_vel intent keeps updating normally, so intent vs actually-observed motion diverges.
+        SoftwareHang,      // Robot otherwise behaves normally, but its probe (blink or actuator, whichever DangerCascadeController.probeType selects) never responds.
         None
     }
 
@@ -61,9 +62,16 @@ public class FaultInjector : MonoBehaviour
                 var _FaultyRabSensor = GameObject.Find(robotName).GetComponentInChildren<RABSensor>();
                 var _FaultyRemoraLidar = GameObject.Find(robotName).GetComponentInChildren<RemoraLIDAR>();
                 var _AdaptiveSamplingPattern = GameObject.Find(robotName).GetComponent<AdaptiveSamplingPattern>();
+                var _FaultyBlinkEmitter = GameObject.Find(robotName).GetComponentInChildren<BlinkEmitter>();
+                var _FaultyActuatorEmitter = GameObject.Find(robotName).GetComponentInChildren<ActuatorEmitter>();
 
                 if (_FaultyActuators == null || _FaultyRabSensor == null || _FaultyRemoraLidar == null)
                     continue;
+
+                // Reset every cycle, only SoftwareHang below sets it — avoids having to repeat a
+                // reset call in every other case just to avoid state leaking across fault switches.
+                if (_FaultyBlinkEmitter != null) _FaultyBlinkEmitter.SetSimulatedHang(false);
+                if (_FaultyActuatorEmitter != null) _FaultyActuatorEmitter.SetSimulatedHang(false);
 
                 switch (selectedFault)
                 {
@@ -187,6 +195,21 @@ public class FaultInjector : MonoBehaviour
                         _manualController.SetMotorStates(1, 1);
                         _FaultyActuators.SetMotorStates(1, 1);
                         _FaultyActuators.SetMotorStates(1, 1);
+                        break;
+
+                    case FaultType.SoftwareHang:
+                        // Robot moves/senses normally — no real hang mechanism exists in-sim, so
+                        // the closest real proxy is making the probe target simply not respond,
+                        // exactly like a genuinely hung robot's control loop wouldn't.
+                        _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault();
+                        _FaultyRemoraLidar.SetSensorState();
+                        _manualController.SetMotorStates();
+                        _manualController.SetMotorStates();
+                        _FaultyActuators.SetMotorStates();
+                        _FaultyActuators.SetMotorStates();
+                        if (_FaultyBlinkEmitter != null) _FaultyBlinkEmitter.SetSimulatedHang(true);
+                        if (_FaultyActuatorEmitter != null) _FaultyActuatorEmitter.SetSimulatedHang(true);
                         break;
 
                     default:

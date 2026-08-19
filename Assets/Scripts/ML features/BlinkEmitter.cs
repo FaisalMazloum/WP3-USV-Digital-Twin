@@ -25,8 +25,12 @@ public class BlinkEmitter : MonoBehaviour, IProbeEmitter
     public int Nmax = 6;
     public float T = 3f;
 
-    [Header("Hang simulation — no real 'software hang' exists in-sim, toggle manually to fail the probe")]
-    public bool simulateHang = false;
+    // No real "software hang" mechanism exists in-sim — FaultInjector.FaultType.SoftwareHang
+    // drives this via SetSimulatedHang() instead of a manual inspector toggle.
+    private bool simulateHang = false;
+
+    /// <summary> FaultInjector-driven (SoftwareHang fault) — see field comment above. </summary>
+    public void SetSimulatedHang(bool hang) { simulateHang = hang; }
 
     public bool IsProbing { get; private set; }
     public bool WindowComplete { get; private set; }

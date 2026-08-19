@@ -26,12 +26,8 @@ public class DangerCascadeController : MonoBehaviour
     [Header("Master switch (Section 1) — false must reproduce vanilla CRM exactly")]
     public bool dangerExtensionEnabled = false;
 
-    // Which probe mechanism PROBING drives — flip this in the inspector to switch, at runtime
-    // if you like, no recompiling or re-wiring GameObjects. Both BlinkEmitter/BlinkReader and
-    // ActuatorEmitter/ActuatorReader need to already be attached to every robot (both can coexist
-    // on the same prefab harmlessly; only the selected one is ever driven). See IProbe.cs.
-    [Header("Probe selection (Section 6)")]
-    public ProbeType probeType = ProbeType.Actuator;
+    [Header("Probe type (Section 6) — only the selected probe runs during PROBING")]
+    public ProbeType probeType = ProbeType.Blink;
 
     [Header("CRM parameter passthrough (Section 8) — defaults match vanilla CRM's consts exactly")]
     // public double c = 0.20;
@@ -58,15 +54,11 @@ public class DangerCascadeController : MonoBehaviour
     [Range(0f, 1f)] public float thetaDisc = 0.3f;
     public int maxPossibleNeighbors = 9; // normalization denominator — NUM_ROBOTS - 1
 
-    // Defaulted OFF: this signal blew way past its tolerance on healthy, un-faulted robots
-    // (whole heatmap read red with no fault injected) — almost certainly the intent/actual
-    // update-rate+latency gap during continuous real movement being much larger than the 30%
-    // tolerance guess covered, on top of a too-tight max_speed-only normalization basis. Flip
-    // this on once you've used the logging below to see real intentL/R vs actualL/R numbers on a
-    // known-healthy robot and picked a tolerance that actually covers it — RAB_discrepancy
-    // detection is completely unaffected either way.
-    public bool enableActuatorDiscrepancy = false;
-    [Range(0f, 1f)] public float actuatorDiscrepancyTolerance = 0.3f;
+    // BACT_discrepancy: simple absolute per-wheel tolerance (cm/s) — |intent - actual| > this on
+    // either wheel counts as a discrepancy this cycle. Now that CmdVel_Subscriber's drive is
+    // kinematic (no PID lag), actual tracks intent essentially exactly for a healthy robot, so a
+    // flat tolerance is enough without the ratio/settle-window machinery this used to need.
+    public float actuatorToleranceCm = 5f;
 
     // Note: Nmin/Nmax/T (Section 6) are NOT duplicated here — each robot's own BlinkEmitter
     // owns those directly, since it's the target's probe capability, not something any one
@@ -121,17 +113,16 @@ public class DangerCascadeController : MonoBehaviour
     // (FaultInjector) drives this for real instead of a simulated proxy toggle.
     private Dictionary<GameObject, RABSensor> observedRabSensors = new Dictionary<GameObject, RABSensor>();
 
-    // Actuator-intent-vs-actual discrepancy (BACT_discrepancy) — compares each target's own
-    // claimed cmd_vel intent (CmdVel_Subscriber.GetIntentVelocities(), unaffected by a motor
-    // fault) against what THIS observer actually measures via its own NeighborStateManager (real
-    // Rigidbody-derived speeds, see NeighborStateManager.PublishJointState()).
+    // Actuator-intent-vs-actual discrepancy (BACT_discrepancy) — both intent and actual come
+    // straight off the target's own CmdVel_Subscriber/Rigidbody, ground truth, zero ROS
+    // involvement (see ComputeActuatorDiscrepancy).
     private Dictionary<GameObject, CmdVel_Subscriber> observedCmdVelSubscribers = new Dictionary<GameObject, CmdVel_Subscriber>();
-    private NeighborStateManager neighborStateManager;
 
-    // Which concrete emitter/reader PROBING drives, chosen by probeType — see IProbe.cs.
-    private Dictionary<GameObject, IProbeEmitter> probeEmitters = new Dictionary<GameObject, IProbeEmitter>();
-    private IProbeReader probeReader;
-    private ProbeType lastProbeType;
+    // PROBING now always dispatches/reads BOTH probes — see class docs.
+    private Dictionary<GameObject, ActuatorEmitter> actuatorEmitters = new Dictionary<GameObject, ActuatorEmitter>();
+    private Dictionary<GameObject, BlinkEmitter> blinkEmitters = new Dictionary<GameObject, BlinkEmitter>();
+    private ActuatorReader actuatorReader;
+    private BlinkReader blinkReader;
 
     // Background CRM thread — mirrors FeatureExtractor's own crmInstance threading, so the
     // (heavier, duplicate) RK2 integration doesn't stall the main thread.
@@ -155,18 +146,18 @@ public class DangerCascadeController : MonoBehaviour
         if (featureExtractor == null)
             Debug.LogError($"{transform.root.name}: DangerCascadeController found no FeatureExtractor!");
 
-        neighborStateManager = GetComponent<NeighborStateManager>();
-        if (neighborStateManager == null)
-            Debug.LogError($"{transform.root.name}: DangerCascadeController found no NeighborStateManager " +
-                "— actuator-intent discrepancy (BACT_discrepancy) will read as 0.");
-
         // swarmConsensus auto-find happens in FixedUpdate (retried until found — see there for why
         // a one-shot attempt here isn't reliable). Optional either way — this whole feature is
         // opt-in (see field comment above).
         startTime = Time.time;
 
-        lastProbeType = probeType;
-        RefreshProbeReader();
+        actuatorReader = GetComponent<ActuatorReader>();
+        if (actuatorReader == null)
+            Debug.LogError($"{transform.root.name}: DangerCascadeController found no ActuatorReader!");
+
+        blinkReader = GetComponent<BlinkReader>();
+        if (blinkReader == null)
+            Debug.LogError($"{transform.root.name}: DangerCascadeController found no BlinkReader!");
 
         if (!(0.0 < investigationCap && investigationCap < E_t))
             Debug.LogWarning($"{transform.root.name}: cap ladder ordering investigationCap < E_t is " +
@@ -208,47 +199,12 @@ public class DangerCascadeController : MonoBehaviour
             }
         }
 
-        // probeType flipped in the inspector at runtime — pick up the new reader immediately,
-        // drop the stale emitter cache (it's keyed by robot but holds references to the OLD
-        // probe type's components), and un-stick any robot currently mid-investigation under the
-        // old probe so it re-enters the ladder cleanly under the new one instead of sitting
-        // orphaned in DISCREPANCY_PASSED/PROBING forever.
-        if (probeType != lastProbeType)
-        {
-            lastProbeType = probeType;
-            RefreshProbeReader();
-            probeEmitters.Clear();
-            ResetInFlightProbes();
-        }
-
         bool nowCreating = featureExtractor.creatingNewSample;
         if (prevCreatingNewSample && !nowCreating)
         {
             LaunchCrmStep();
         }
         prevCreatingNewSample = nowCreating;
-    }
-
-    void RefreshProbeReader()
-    {
-        probeReader = probeType == ProbeType.Actuator
-            ? (IProbeReader)GetComponent<ActuatorReader>()
-            : (IProbeReader)GetComponent<BlinkReader>();
-        if (probeReader == null)
-            Debug.LogError($"{transform.root.name}: DangerCascadeController found no {probeType}Reader!");
-    }
-
-    void ResetInFlightProbes()
-    {
-        foreach (var ladder in ladders.Values)
-        {
-            if (ladder.state == RobotFaultState.DISCREPANCY_PASSED || ladder.state == RobotFaultState.PROBING)
-            {
-                ladder.state = RobotFaultState.NORMAL;
-                ladder.outlierWindow.Clear();
-                ladder.discrepancyWindow.Clear();
-            }
-        }
     }
 
     void Update()
@@ -369,8 +325,16 @@ public class DangerCascadeController : MonoBehaviour
                             $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
                     ladder.state = RobotFaultState.FAULT;
                 }
-                else if (broadcastState == RobotFaultState.CLEARED && ladder.state != RobotFaultState.CLEARED)
+                else if (broadcastState == RobotFaultState.CLEARED && ladder.state != RobotFaultState.CLEARED
+                    && (Time.time - broadcastTime) <= clearedTagDuration)
                 {
+                    // The staleness check above is the actual fix for a real bug: the coordinator
+                    // never removes an old broadcast, so without checking whether it's already
+                    // expired, this would re-adopt CLEARED (with the SAME old timestamp) every
+                    // single cycle forever, even long after it should have lapsed. Since adoption
+                    // runs before the switch statement below, that re-adoption pre-empted the
+                    // NORMAL case's own E>R check every cycle too — permanently freezing the
+                    // ladder out of ever re-entering PRIMED, regardless of what fault came later.
                     if (logStateTransitions)
                         Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> CLEARED " +
                             $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
@@ -426,36 +390,50 @@ public class DangerCascadeController : MonoBehaviour
 
                 case RobotFaultState.DISCREPANCY_PASSED:
                 {
-                    IProbeEmitter emitter = GetProbeEmitter(observedRobot);
-                    if (emitter != null)
+                    // Only the selected probeType is dispatched — the other emitter is never
+                    // touched, so it can't be running "in the background" alongside it.
+                    if (probeType == ProbeType.Actuator)
                     {
-                        emitter.RequestProbe();
-                        ladder.state = RobotFaultState.PROBING;
+                        ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
+                        if (actuatorEmitter != null) actuatorEmitter.RequestProbe();
                     }
+                    else
+                    {
+                        BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
+                        if (blinkEmitter != null) blinkEmitter.RequestProbe();
+                    }
+                    ladder.state = RobotFaultState.PROBING;
                     break;
                 }
 
                 case RobotFaultState.PROBING:
                 {
-                    // Deliberately NOT calling emitter.ResetProbe() here — the result stays put on
-                    // the emitter until the next RequestProbe() overwrites it, so every observer
-                    // with a ladder in PROBING for this target can independently read the same
-                    // completed result at its own pace instead of racing to consume it first.
-                    IProbeEmitter emitter = GetProbeEmitter(observedRobot);
-                    if (emitter != null && probeReader != null)
+                    // Deliberately NOT calling ResetProbe() — same multi-observer-safe reasoning
+                    // as before: the result stays put until the next RequestProbe() naturally
+                    // supersedes it, so every observer with a ladder in PROBING for this target
+                    // can read independently at its own pace instead of racing to consume first.
+                    ProbeResult result;
+                    if (probeType == ProbeType.Actuator)
                     {
-                        probeResult = probeReader.ReadResult(emitter);
-                        if (probeResult == ProbeResult.Pass)
-                        {
-                            ladder.state = RobotFaultState.CLEARED;
-                            ladder.clearedTime = Time.time;
-                        }
-                        else if (probeResult == ProbeResult.Fail)
-                        {
-                            ladder.state = RobotFaultState.FAULT; // failed probe
-                        }
-                        // Pending: probe still running, stay in PROBING.
+                        ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
+                        result = (actuatorEmitter != null && actuatorReader != null)
+                            ? actuatorReader.ReadResult(actuatorEmitter) : ProbeResult.Pending;
                     }
+                    else
+                    {
+                        BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
+                        result = (blinkEmitter != null && blinkReader != null)
+                            ? blinkReader.ReadResult(blinkEmitter) : ProbeResult.Pending;
+                    }
+
+                    if (result != ProbeResult.Pending)
+                    {
+                        probeResult = result;
+                        ladder.state = result == ProbeResult.Pass ? RobotFaultState.CLEARED : RobotFaultState.FAULT;
+                        if (result == ProbeResult.Pass)
+                            ladder.clearedTime = Time.time;
+                    }
+                    // else: at least one probe still running, stay in PROBING.
                     break;
                 }
 
@@ -531,11 +509,11 @@ public class DangerCascadeController : MonoBehaviour
     // Combined discrepancy signal (Section 4d/7) — the max of two independent per-target
     // discrepancies: neighbour-count self-report (RAB_discrepancy) and actuator-intent-vs-actual
     // (BACT_discrepancy). Either alone crossing thetaDisc is enough; this is what feeds PRIMED's
-    // window and the always-on arm.
+    // window and the always-on arm. Always both — no manual enable switch.
     float ComputeDiscrepancy(GameObject observedRobot)
     {
         float neighborCountDiscrepancy = ComputeNeighborCountDiscrepancy(observedRobot);
-        float actuatorDiscrepancy = enableActuatorDiscrepancy ? ComputeActuatorDiscrepancy(observedRobot) : 0f;
+        float actuatorDiscrepancy = ComputeActuatorDiscrepancy(observedRobot);
         return Mathf.Max(neighborCountDiscrepancy, actuatorDiscrepancy);
     }
 
@@ -554,15 +532,10 @@ public class DangerCascadeController : MonoBehaviour
     }
 
     // BACT_discrepancy: commanded intent vs. actually-achieved motion, BOTH read straight off the
-    // target's own CmdVel_Subscriber/Rigidbody (ground truth, zero ROS involvement) — deliberately
-    // NOT NeighborStateManager's ObservedRobotData, which is a 10Hz-published/subscribed value and
-    // would conflate real actuator faults with ordinary publish-rate/network latency. Normalized
-    // by the hull's max thruster speed (cm/s) so it's on a comparable scale to the neighbour-count
-    // fraction above.
+    // target's own CmdVel_Subscriber/Rigidbody (ground truth, zero ROS involvement) — plain
+    // |intent - actual| > actuatorToleranceCm per wheel.
     float ComputeActuatorDiscrepancy(GameObject observedRobot)
     {
-        if (neighborStateManager == null) return 0f;
-
         if (!observedCmdVelSubscribers.TryGetValue(observedRobot, out CmdVel_Subscriber cmdVel))
         {
             cmdVel = observedRobot.GetComponentInChildren<CmdVel_Subscriber>();
@@ -570,43 +543,37 @@ public class DangerCascadeController : MonoBehaviour
         }
         if (cmdVel == null) return 0f;
 
-        float maxSpeedCm = neighborStateManager.max_speed * 100f; // cm/s, matches the convention used everywhere else here
-        if (maxSpeedCm <= 0f) return 0f;
-
         Dictionary<string, float> intent = cmdVel.GetIntentVelocities();
         Dictionary<string, float> actual = cmdVel.GetActualThrusterSpeeds();
+
         float leftDiff = Mathf.Abs(intent["left_thruster"] - actual["left_thruster"]);
         float rightDiff = Mathf.Abs(intent["right_thruster"] - actual["right_thruster"]);
-        float maxDiff = Mathf.Max(leftDiff, rightDiff);
+        bool exceeded = leftDiff > actuatorToleranceCm || rightDiff > actuatorToleranceCm;
 
-        // Absolute slack, not relative to intent — a relative tolerance (like the active probe's
-        // toleranceFraction) breaks down when intent is near zero (e.g. commanded to sit still),
-        // which is common during ordinary passive monitoring but never happens during the active
-        // probe's fixed nonzero test rotation.
-        float toleranceCm = actuatorDiscrepancyTolerance * maxSpeedCm;
-        float excessDiff = Mathf.Max(0f, maxDiff - toleranceCm);
-        float result = excessDiff / maxSpeedCm;
-
-        // Only logs once this actually exceeds tolerance, so turning this on doesn't spam —
-        // use these real numbers to pick a tolerance that covers this robot's normal update-rate
-        // lag before flipping enableActuatorDiscrepancy on.
-        if (logStateTransitions && excessDiff > 0f)
+        if (logStateTransitions && exceeded)
             Debug.Log($"{transform.root.name}: actuator discrepancy for {observedRobot.name} — " +
                 $"intent L={intent["left_thruster"]:F1} R={intent["right_thruster"]:F1} | " +
-                $"actual(ground truth) L={actual["left_thruster"]:F1} R={actual["right_thruster"]:F1} (cm/s) | " +
-                $"maxDiff={maxDiff:F1} tolerance={toleranceCm:F1} -> discrepancy={result:F3}");
+                $"actual(ground truth) L={actual["left_thruster"]:F1} R={actual["right_thruster"]:F1} (cm/s)");
 
-        return result;
+        return exceeded ? 1f : 0f;
     }
 
-    IProbeEmitter GetProbeEmitter(GameObject observedRobot)
+    ActuatorEmitter GetActuatorEmitter(GameObject observedRobot)
     {
-        if (!probeEmitters.TryGetValue(observedRobot, out IProbeEmitter emitter))
+        if (!actuatorEmitters.TryGetValue(observedRobot, out ActuatorEmitter emitter))
         {
-            emitter = probeType == ProbeType.Actuator
-                ? (IProbeEmitter)observedRobot.GetComponentInChildren<ActuatorEmitter>()
-                : (IProbeEmitter)observedRobot.GetComponentInChildren<BlinkEmitter>();
-            probeEmitters[observedRobot] = emitter;
+            emitter = observedRobot.GetComponentInChildren<ActuatorEmitter>();
+            actuatorEmitters[observedRobot] = emitter;
+        }
+        return emitter;
+    }
+
+    BlinkEmitter GetBlinkEmitter(GameObject observedRobot)
+    {
+        if (!blinkEmitters.TryGetValue(observedRobot, out BlinkEmitter emitter))
+        {
+            emitter = observedRobot.GetComponentInChildren<BlinkEmitter>();
+            blinkEmitters[observedRobot] = emitter;
         }
         return emitter;
     }
