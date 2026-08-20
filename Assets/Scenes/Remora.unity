@@ -122,6 +122,90 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &6789947
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6789949}
+  - component: {fileID: 6789948}
+  m_Layer: 0
+  m_Name: DummySim
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &6789948
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6789947}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af1a02bab46c1ebe4bcf0c048de8efc5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  bfvGroups:
+  - label: Majority
+    F1: 0
+    F2: 1
+    F3: 1
+    F4: 1
+    F5: 1
+    F6: 0
+    robotCount: 8
+    isFaultTarget: 0
+  - label: Edge
+    F1: 0
+    F2: 1
+    F3: 1
+    F4: 0
+    F5: 0
+    F6: 1
+    robotCount: 1
+    isFaultTarget: 0
+  - label: Faulty
+    F1: 1
+    F2: 1
+    F3: 1
+    F4: 0
+    F5: 0
+    F6: 0
+    robotCount: 1
+    isFaultTarget: 1
+  totalRobotCount: 10
+  faultInjector: {fileID: 1970658656}
+  clearedTagDuration: 20
+  probeWindowT: 3
+  controlCycleSeconds: 1
+  dangerExtensionEnabled: 1
+  investigationCap: 1
+  E_t: 2
+  thetaDisc: 0.3
+  c: 0.11
+  pi_E: 0.001
+  pi_R: 0.0007
+--- !u!4 &6789949
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6789947}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 99.96128, y: 2.6148617, z: 101.46101}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &12345137
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -683,7 +767,7 @@ MonoBehaviour:
   robotPrefab: {fileID: 413413381}
   numberOfRobots: 9
   spacing: 1.4
-  selected_layout: 2
+  selected_layout: 0
   arenaSize: 20
   robotDiameter: 0.45
   safetyMargin: 0.1
@@ -10467,7 +10551,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &521902327
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -15214,6 +15298,7 @@ GameObject:
   - component: {fileID: 753810534}
   - component: {fileID: 753810536}
   - component: {fileID: 753810537}
+  - component: {fileID: 753810538}
   m_Layer: 0
   m_Name: HeatmapManager
   m_TagString: Untagged
@@ -15269,11 +15354,25 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 753810533}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 43262cc5876c6e303b3e7cc9911713fe, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  start: 0
+--- !u!114 &753810538
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 753810533}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 23e32a4f8c312ffaea8dc4088f608110, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  swarm: {fileID: 6789948}
   start: 0
 --- !u!4 &754108996 stripped
 Transform:
@@ -33664,7 +33763,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d7db29d1f774901aa160957b56d97b5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  selected_pattern: 1
+  selected_pattern: 4
   robots:
   - 0
   - 1
@@ -40163,9 +40262,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _manualController: {fileID: 1994622783}
-  selectedFault: 6
+  selectedFault: 11
   faulty_robots:
-  - remora1
+  - remora0
   injectFault: 0
   faultInjectionTime: -1
   showRobots: 0
@@ -45226,3 +45325,4 @@ SceneRoots:
   - {fileID: 983131848}
   - {fileID: 1381468436}
   - {fileID: 2079522248}
+  - {fileID: 6789949}

@@ -47,6 +47,7 @@ public class AutomatedDataCollection : MonoBehaviour
 // ================ MISC TEST ================
         initialWait = 10f;
         postSpawnWait = 5f;
+        postSpawnWait = 5f;
         ROS2Wait = 5f;
         stabalizePeriod = -1f;   // doesnt need stabalization period since it is random_walk
         postStartCollectionWait = -1f;     //
