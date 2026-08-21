@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 /// <summary>
@@ -49,6 +50,28 @@ public class DummyBFVSwarm : MonoBehaviour
     public double pi_E = 1e-3;
     public double pi_R = 0.7e-3;
 
+    [Header("CSV logging — event log always on; per-cycle debug log optional (large files)")]
+    public string csvOutputFolder = "Scripts/ML features/Danger Theory + CRM/dummy/data"; // relative to Assets/, or an absolute path
+    public int trialId = 0;
+    // Logged as its own CSV column. When autoInjectAtOffset is off (default), this is purely
+    // informational — nothing reads it, DummyBFVAutomation (if present/enabled) overwrites it
+    // with its own swept combo.offset each trial anyway. When autoInjectAtOffset is on, THIS
+    // value is what actually drives the standalone injection below.
+    public float injectionOffset = 0f;
+    // Standalone, non-swept version of what DummyBFVAutomation's injection-timing does: once the
+    // fault-target robot has been CLEARED for >= injectionOffset seconds (and still within
+    // clearedTagDuration, never after expiry), sets faultInjector.injectFault = true itself — no
+    // automation component or sweep needed, for quick manual single-trial testing. Fires once per
+    // BuildSwarm(). Automatically stays off if a DummyBFVAutomation on this GameObject has
+    // automationEnabled = true, since that already owns injection timing and the two would
+    // otherwise fight over faultInjector.injectFault.
+    public bool autoInjectAtOffset = false;
+    public bool enablePerCycleLog = false;
+    // Momentary button (auto-resets to false): stops accepting new log rows after the
+    // in-flight control cycle(s) for this frame finish, then flushes both CSVs to disk. One-way
+    // for the rest of this Play session — mirrors DangerCascadeController's exportCSV pattern.
+    public bool stopLoggingAndExport = false;
+
     public class VirtualRobot
     {
         public int id;
@@ -74,22 +97,73 @@ public class DummyBFVSwarm : MonoBehaviour
 
     public List<VirtualRobot> robots = new List<VirtualRobot>();
 
-    private int faultTargetRobotId = -1;
+    // How many times each robot (by id) has entered investigation (NORMAL -> PRIMED), since the
+    // last BuildSwarm(). Canonical-observer-deduped, same as the CSV event log. Not itself a CSV
+    // column (doesn't match any of the 7 logged event_types) — exists for DummyBFVAutomation to
+    // poll when deciding when an experiment's maxCyclesPerExperiment give-up cap has been reached.
+    public Dictionary<int, int> investigationCounts = new Dictionary<int, int>();
 
-    // Own simulated clock (accumulated fixed-step time), deliberately not Time.time — keeps
-    // clearedTagDuration expiry self-contained and reproducible independent of when this
-    // component happened to start relative to the rest of the scene.
-    private float simTime = 0f;
+    // sim_time each robot (by id) most recently entered CLEARED, since the last BuildSwarm().
+    // Canonical-observer-deduped, same instant the "cleared" CSV event fires. Exists for
+    // DummyBFVAutomation to time a fault injection relative to a CLEARED entry.
+    public Dictionary<int, float> lastClearedTime = new Dictionary<int, float>();
+
+    // Robots (by id) that have been classified_faulty at least once since the last BuildSwarm().
+    // Canonical-observer-deduped, updated at the same point the "classified_faulty" CSV event
+    // fires. Exists for DummyBFVAutomation to know when a combination's fault was actually caught.
+    public HashSet<int> classifiedFaultyRobots = new HashSet<int>();
+
+    public int FaultTargetRobotId => faultTargetRobotId;
+
+    // The sim's "current time" is always an exact multiple of controlCycleSeconds — everything
+    // that reads it (CLEARED-expiry comparisons, CSV timestamps, DummyBFVAutomation's offset
+    // timing) only ever changes once per control cycle anyway, so there is no reason to feed it
+    // a continuously-accumulated clock. Previously this was `simTime += Time.fixedDeltaTime`
+    // every physics tick, sampled at whatever noisy value it happened to be the instant
+    // RunControlCycle() ran — that overshoot (up to one physics tick, and briefly reused
+    // identically for two cycles if a frame hitch ran the control-cycle while-loop twice) is
+    // exactly what made cleared_duration's actual observed value inconsistent between trials.
+    // cycleCount increments once per RunControlCycle() call and is never reset by BuildSwarm()
+    // (matches the old simTime's behavior of being a global, monotonic clock for the whole Play
+    // session, not per-experiment).
+    public float SimTime => cycleCount * controlCycleSeconds;
+
+    private int faultTargetRobotId = -1;
+    private bool faultWasActive = false;
+    private int cycleCount = 0;
+    private bool autoInjectedThisRun = false;
+    private DummyBFVAutomation siblingAutomation;
+
+    private DummyBFVCsvLogger logger;
 
     void Awake()
     {
+        string dir = Path.IsPathRooted(csvOutputFolder)
+            ? csvOutputFolder
+            : Path.Combine(Application.dataPath, csvOutputFolder);
+        logger = new DummyBFVCsvLogger(dir);
+
+        siblingAutomation = GetComponent<DummyBFVAutomation>();
+
         BuildSwarm();
     }
+
+    // Defensive flush — covers Editor Stop-Play and build quit, so a run that's killed rather
+    // than cleanly stopped via stopLoggingAndExport doesn't lose buffered per-cycle rows. The
+    // event log has no buffer (written immediately) so nothing to flush there.
+    void OnDestroy() => logger?.FlushCycleBuffer();
+    void OnApplicationQuit() => logger?.FlushCycleBuffer();
 
     public void BuildSwarm()
     {
         robots.Clear();
         faultTargetRobotId = -1;
+        investigationCounts.Clear();
+        lastClearedTime.Clear();
+        classifiedFaultyRobots.Clear();
+        autoInjectedThisRun = false;
+        if (autoInjectAtOffset && faultInjector != null)
+            faultInjector.injectFault = false; // clean slate — robot must clear on its own first
 
         int nextId = 0;
         for (int g = 0; g < bfvGroups.Count; g++)
@@ -126,6 +200,53 @@ public class DummyBFVSwarm : MonoBehaviour
                 observer.classificationHistories[target.id] = new Queue<int>();
             }
         }
+
+        LogDurationAlignmentDiagnostic();
+        LogAutoInjectDiagnostic();
+    }
+
+    // SimTime (what every CLEARED-expiry check and offset comparison runs against) only ever
+    // advances in whole controlCycleSeconds steps. A clearedTagDuration that isn't a multiple of
+    // that gets silently rounded UP to the next reachable cycle boundary in the actual expiry
+    // check — e.g. controlCycleSeconds=1, clearedTagDuration=2.5 actually expires at 3s, not 2.5s.
+    // Runs once per BuildSwarm() so that's visible instead of having to reverse-engineer it later.
+    void LogDurationAlignmentDiagnostic()
+    {
+        float cc = Mathf.Max(controlCycleSeconds, 0.0001f);
+        float effectiveDuration = Mathf.Ceil(clearedTagDuration / cc) * cc;
+        if (!Mathf.Approximately(effectiveDuration, clearedTagDuration))
+            Debug.LogWarning($"DummyBFVSwarm: clearedTagDuration={clearedTagDuration} is not a multiple of controlCycleSeconds={cc} " +
+                $"— the CLEARED tag will actually expire at {effectiveDuration}s, not {clearedTagDuration}s. Use a multiple of controlCycleSeconds for exact durations.");
+    }
+
+    // autoInjectAtOffset fails silently by design (it's a per-tick gate, not worth a warning every
+    // frame) — this runs once per BuildSwarm() so the actual blocking reason, if any, is visible
+    // in the Console immediately instead of you having to guess.
+    void LogAutoInjectDiagnostic()
+    {
+        if (!autoInjectAtOffset) return;
+
+        if (siblingAutomation != null && siblingAutomation.automationEnabled)
+            Debug.LogWarning("DummyBFVSwarm: autoInjectAtOffset is ON but ignored — sibling DummyBFVAutomation.automationEnabled is also true, which owns injection timing instead. Untick one of them.");
+        else if (faultInjector == null)
+            Debug.LogWarning("DummyBFVSwarm: autoInjectAtOffset is ON but faultInjector is not assigned.");
+        else if (faultTargetRobotId < 0)
+            Debug.LogWarning("DummyBFVSwarm: autoInjectAtOffset is ON but no bfvGroups entry has isFaultTarget checked — there is no robot to inject.");
+        else if (!dangerExtensionEnabled)
+            Debug.LogWarning("DummyBFVSwarm: autoInjectAtOffset is ON but dangerExtensionEnabled is OFF — the ladder never engages (stays NORMAL, no CLEARED is ever reached), so the CLEARED-relative offset can never fire.");
+        else
+        {
+            // Same reachability check as DummyBFVAutomation.TryGetFeasibleOffset — injectionOffset
+            // must land on a value SimTime can actually equal, and strictly before expiry.
+            float cc = Mathf.Max(controlCycleSeconds, 0.0001f);
+            float feasibleOffset = Mathf.Ceil(injectionOffset / cc) * cc;
+            if (feasibleOffset < 0f || feasibleOffset >= clearedTagDuration)
+                Debug.LogWarning($"DummyBFVSwarm: autoInjectAtOffset is ON but injectionOffset={injectionOffset} rounds up to {feasibleOffset}s at " +
+                    $"controlCycleSeconds={cc}, which is at or past clearedTagDuration={clearedTagDuration} — the injection will never fire. Lower injectionOffset or raise clearedTagDuration.");
+            else
+                Debug.Log($"DummyBFVSwarm: autoInjectAtOffset armed — watching robot {faultTargetRobotId} (BFV={robots[faultTargetRobotId].currentBFV}) for its first CLEARED, will inject at {feasibleOffset}s after that. " +
+                    $"If robot {faultTargetRobotId}'s BFV is not an outlier relative to the rest of the swarm it will never reach PRIMED/CLEARED at all, and this will wait forever.");
+        }
     }
 
     private float controlCycleTimer = 0f;
@@ -135,7 +256,6 @@ public class DummyBFVSwarm : MonoBehaviour
         if (robots.Count == 0) return;
 
         float dt = Time.fixedDeltaTime;
-        simTime += dt;
 
         ApplyFaultInjection();
         SyncBFVFromInspector();
@@ -154,6 +274,41 @@ public class DummyBFVSwarm : MonoBehaviour
             controlCycleTimer -= controlCycleSeconds;
             RunControlCycle();
         }
+
+        // Checked AFTER the while-loop above, so it sees this frame's freshest lastClearedTime
+        // if a control cycle just ran.
+        RunAutoInject();
+
+        // Checked AFTER the while-loop above, so any control cycle(s) due this frame still
+        // finish and log normally first — no partial-cycle data loss ("after the cycle completes").
+        if (stopLoggingAndExport)
+        {
+            stopLoggingAndExport = false;
+            logger.Stop();
+            Debug.Log("DummyBFVSwarm: logging stopped, CSVs flushed.");
+        }
+    }
+
+    // Standalone counterpart to DummyBFVAutomation's own injection-timing logic (see
+    // autoInjectAtOffset's doc comment) — off by default, and a no-op whenever a sibling
+    // DummyBFVAutomation is actively driving injection itself, so the two never fight over
+    // faultInjector.injectFault.
+    void RunAutoInject()
+    {
+        if (!autoInjectAtOffset) return;
+        if (siblingAutomation != null && siblingAutomation.automationEnabled) return;
+        if (faultInjector == null || faultTargetRobotId < 0) return;
+        if (autoInjectedThisRun) return;
+        if (!lastClearedTime.TryGetValue(faultTargetRobotId, out float clearedAt)) return;
+
+        float elapsedSinceCleared = SimTime - clearedAt;
+        if (elapsedSinceCleared >= injectionOffset && elapsedSinceCleared < clearedTagDuration)
+        {
+            faultInjector.injectFault = true;
+            autoInjectedThisRun = true;
+            Debug.Log($"DummyBFVSwarm: auto-injected fault ({faultInjector.selectedFault}) on robot {faultTargetRobotId} " +
+                $"at sim_time={SimTime:F2} (injectionOffset={injectionOffset}).");
+        }
     }
 
     // Point 5 — lets BFV checkboxes be toggled live in Play mode: robots aren't re-instantiated,
@@ -168,6 +323,18 @@ public class DummyBFVSwarm : MonoBehaviour
 
     void RunControlCycle()
     {
+        // Exact multiple of controlCycleSeconds, distinct for every call (even if the while-loop
+        // in FixedUpdate runs this twice in one real frame after a hitch) — see SimTime's doc
+        // comment above for why this replaced a continuously-accumulated clock.
+        cycleCount++;
+        float currentTime = cycleCount * controlCycleSeconds;
+
+        // FeatureExtractor.CRM_HISTORY_LENGTH (9) is a cycle count that only means "9 real
+        // seconds" because the live sim's own control cycle is a fixed 1s. Since
+        // controlCycleSeconds is adjustable here, scale the window length so it always spans the
+        // same 9 real seconds regardless of cadence (e.g. halving controlCycleSeconds doubles it).
+        int historyLength = Mathf.Max(1, Mathf.RoundToInt(FeatureExtractor.CRM_HISTORY_LENGTH / Mathf.Max(controlCycleSeconds, 0.0001f)));
+
         // Section 6 — single global fvCounts dict, identical for every observer.
         var fvCounts = new Dictionary<int, int>();
         foreach (var robot in robots)
@@ -186,12 +353,31 @@ public class DummyBFVSwarm : MonoBehaviour
             observer.crmInstance.SimulationStep(fvCounts);
         }
 
-        // Each (observer, target) pair: run the ported ladder engine.
+        // Snapshot each target's probe state before the ladder loop runs, so probe transitions
+        // (RequestProbe()/ReadResult() calls happen inside DummyDangerLadderEngine.Tick() below)
+        // can be detected once per TARGET afterward, not once per redundant observer.
+        var probeWasActive = new Dictionary<int, bool>();
+        var probeWasComplete = new Dictionary<int, bool>();
+        foreach (var r in robots)
+        {
+            probeWasActive[r.id] = r.probe.IsProbing && !r.probe.WindowComplete;
+            probeWasComplete[r.id] = r.probe.WindowComplete;
+        }
+
+        // Each (observer, target) pair: run the ported ladder engine. Every observer's copy is
+        // numerically identical for a given target (Section 6 — same global fvCounts, same
+        // params, same deterministic ODE), so event/debug logging below only fires for one
+        // designated "canonical" observer per target to avoid N-1 duplicate rows for the same
+        // real-world event — see IsCanonicalObserver.
         foreach (var observer in robots)
         {
             foreach (var target in robots)
             {
                 if (target.id == observer.id) continue;
+
+                var ladder = observer.ladders[target.id];
+                var stateBefore = ladder.state;
+                observer.verdicts.TryGetValue(target.id, out bool verdictBefore);
 
                 double rawE = observer.crmInstance.sumE[target.currentBFV];
                 double rawR = observer.crmInstance.sumR[target.currentBFV];
@@ -200,19 +386,92 @@ public class DummyBFVSwarm : MonoBehaviour
                 float discrepancySignal = target.discrepancyFault ? 1f : 0f;
 
                 bool verdict = DummyDangerLadderEngine.Tick(
-                    observer.ladders[target.id],
+                    ladder,
                     rawE, rawR,
                     discrepancySignal, thetaDisc,
                     fvClassification, observer.classificationHistories[target.id],
                     target.probe, target.probe,
                     investigationCap, E_t, clearedTagDuration,
                     dangerExtensionEnabled,
-                    simTime);
+                    currentTime,
+                    historyLength);
 
                 observer.verdicts[target.id] = verdict;
-                observer.states[target.id] = observer.ladders[target.id].state;
+                observer.states[target.id] = ladder.state;
+
+                if (!IsCanonicalObserver(observer, target)) continue;
+
+                if (stateBefore == DangerCascadeController.RobotFaultState.NORMAL && ladder.state == DangerCascadeController.RobotFaultState.PRIMED)
+                {
+                    investigationCounts.TryGetValue(target.id, out int countSoFar);
+                    investigationCounts[target.id] = countSoFar + 1;
+                }
+
+                if (ladder.state == DangerCascadeController.RobotFaultState.CLEARED && stateBefore != DangerCascadeController.RobotFaultState.CLEARED)
+                {
+                    lastClearedTime[target.id] = currentTime;
+                    logger.LogEvent(trialId, injectionOffset, clearedTagDuration, currentTime, "cleared", target.id.ToString());
+                }
+
+                if (stateBefore == DangerCascadeController.RobotFaultState.CLEARED && ladder.state == DangerCascadeController.RobotFaultState.NORMAL)
+                    logger.LogEvent(trialId, injectionOffset, clearedTagDuration, currentTime, "tag_expired", target.id.ToString());
+
+                // "verdict" is computed from ladder.state as it was BEFORE the switch above ran
+                // (faithful to the original DangerCascadeController), so on the exact cycle a
+                // robot transitions PROBING -> FAULT, verdict still reflects the old PROBING
+                // state and only catches up next cycle — a real 1-cycle detection lag if this
+                // were the only trigger. Checking the FAULT transition directly (post-switch,
+                // like "cleared"/"tag_expired" above) fixes that for the ladder-driven path,
+                // while keeping the verdict-based check for the always-on discrepancy-arm path
+                // (Section 7), which has no such lag since discrepancyMajority is evaluated
+                // before the switch too and doesn't depend on this cycle's transition.
+                bool justEnteredFault = stateBefore != DangerCascadeController.RobotFaultState.FAULT
+                    && ladder.state == DangerCascadeController.RobotFaultState.FAULT;
+                bool justFlaggedByVerdict = verdict && !verdictBefore;
+                if (justEnteredFault || justFlaggedByVerdict)
+                {
+                    classifiedFaultyRobots.Add(target.id);
+                    logger.LogEvent(trialId, injectionOffset, clearedTagDuration, currentTime, "classified_faulty", target.id.ToString());
+                }
+
+                if (enablePerCycleLog)
+                {
+                    double cap = DummyDangerLadderEngine.GetEmaxForState(stateBefore, rawR, investigationCap);
+                    string probeResultStr = target.probe.WindowComplete ? (target.probe.Passed ? "PASS" : "FAIL")
+                        : (target.probe.IsProbing ? "PENDING" : "NA");
+                    fvCounts.TryGetValue(target.currentBFV, out int countAj);
+
+                    logger.LogCycle(trialId, injectionOffset, clearedTagDuration, currentTime, target.id, target.currentBFV, countAj,
+                        ladder.state.ToString(), rawE, rawR, cap, probeResultStr,
+                        fvClassification.ToString(), target.isFaulty);
+                }
             }
         }
+
+        // Probe dispatch/pass/fail — target-centric (the probe is a single shared object per
+        // target), so this is detected once per target here rather than once per observer pair.
+        foreach (var r in robots)
+        {
+            bool activeNow = r.probe.IsProbing && !r.probe.WindowComplete;
+            if (activeNow && !probeWasActive[r.id])
+                logger.LogEvent(trialId, injectionOffset, clearedTagDuration, currentTime, "probe_dispatched", r.id.ToString());
+
+            if (r.probe.WindowComplete && !probeWasComplete[r.id])
+                logger.LogEvent(trialId, injectionOffset, clearedTagDuration, currentTime, r.probe.Passed ? "probe_pass" : "probe_fail", r.id.ToString());
+        }
+
+        if (enablePerCycleLog)
+            logger.FlushCycleBuffer();
+    }
+
+    // All N observers reach byte-identical conclusions about a given target (Section 6's global
+    // counts + shared params + deterministic ODE), so exactly one observer is designated to emit
+    // target-centric event/debug rows, avoiding N-1 duplicate rows per real event.
+    bool IsCanonicalObserver(VirtualRobot observer, VirtualRobot target)
+    {
+        if (robots.Count < 2) return false;
+        int canonicalId = (robots[0].id == target.id) ? robots[1].id : robots[0].id;
+        return observer.id == canonicalId;
     }
 
     // Section 5 — reads the existing FaultInjector's public fields only (injectFault,
@@ -228,18 +487,29 @@ public class DummyBFVSwarm : MonoBehaviour
             robot.probe.isFaulty = false;
         }
 
-        if (faultInjector == null || faultTargetRobotId < 0) return;
-        if (!faultInjector.injectFault || faultInjector.selectedFault == FaultInjector.FaultType.None) return;
+        bool faultActiveNow = faultInjector != null && faultTargetRobotId >= 0
+            && faultInjector.injectFault && faultInjector.selectedFault != FaultInjector.FaultType.None;
 
-        var target = robots[faultTargetRobotId];
-        target.isFaulty = true;
-        target.probe.isFaulty = true;
-
-        // Section 7 — discrepancy fires independently of whether the BFV is an outlier.
-        if (faultInjector.selectedFault == FaultInjector.FaultType.RAB_discrepancy ||
-            faultInjector.selectedFault == FaultInjector.FaultType.BACT_discrepancy)
+        if (faultActiveNow)
         {
-            target.discrepancyFault = true;
+            var target = robots[faultTargetRobotId];
+            target.isFaulty = true;
+            target.probe.isFaulty = true;
+
+            // Section 7 — discrepancy fires independently of whether the BFV is an outlier.
+            if (faultInjector.selectedFault == FaultInjector.FaultType.RAB_discrepancy ||
+                faultInjector.selectedFault == FaultInjector.FaultType.BACT_discrepancy)
+            {
+                target.discrepancyFault = true;
+            }
         }
+
+        // Edge-triggered — one row per actual injection, not one per tick the flag stays checked.
+        // Uses the quantized clock (as of the last completed control cycle) for consistency with
+        // every other timestamp in the log, even though ApplyFaultInjection() itself runs every
+        // physics tick, not just on control-cycle boundaries.
+        if (faultActiveNow && !faultWasActive)
+            logger.LogEvent(trialId, injectionOffset, clearedTagDuration, SimTime, "fault_injected", robots[faultTargetRobotId].id.ToString());
+        faultWasActive = faultActiveNow;
     }
 }

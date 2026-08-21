@@ -132,6 +132,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6789949}
   - component: {fileID: 6789948}
+  - component: {fileID: 6789950}
   m_Layer: 0
   m_Name: DummySim
   m_TagString: Untagged
@@ -183,7 +184,7 @@ MonoBehaviour:
   faultInjector: {fileID: 1970658656}
   clearedTagDuration: 20
   probeWindowT: 3
-  controlCycleSeconds: 1
+  controlCycleSeconds: 0.5
   dangerExtensionEnabled: 1
   investigationCap: 1
   E_t: 2
@@ -191,6 +192,12 @@ MonoBehaviour:
   c: 0.11
   pi_E: 0.001
   pi_R: 0.0007
+  csvOutputFolder: Scripts/ML features/Danger Theory + CRM/dummy/data
+  trialId: 0
+  injectionOffset: 5
+  autoInjectAtOffset: 1
+  enablePerCycleLog: 0
+  stopLoggingAndExport: 0
 --- !u!4 &6789949
 Transform:
   m_ObjectHideFlags: 0
@@ -206,6 +213,43 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6789950
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6789947}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 03c4411f7c494c3b19f9d9e67c0dbf8f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  automationEnabled: 1
+  useManualSweep: 1
+  startClearedDuration: 0
+  clearedDurationStep: 5
+  numDurations: 20
+  manualClearedDurations:
+  - 2
+  - 6
+  - 10
+  - 20
+  - 40
+  - 70
+  enableInjectionSweep: 1
+  injectionOffsetStep: 2
+  manualInjectionOffsetFractions:
+  - 0
+  - 0.25
+  - 0.5
+  - 0.75
+  - 1
+  stopOnClassification: 1
+  maxCyclesPerExperiment: 100
+  T_run: 300
+  trackFaultTargetRobot: 1
+  explicitRobotId: 9
 --- !u!1001 &12345137
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -15373,7 +15417,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   swarm: {fileID: 6789948}
-  start: 0
+  start: 1
 --- !u!4 &754108996 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3192925013080293983, guid: 6c364f20083a9cf4c8e7a2c139d4c571, type: 3}
@@ -28543,7 +28587,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1409338546
 Transform:
   m_ObjectHideFlags: 0

@@ -44,20 +44,26 @@ public static class DummyDangerLadderEngine
         }
     }
 
-    // Verbatim port of DangerCascadeController.EnqueueWindow/WindowMajority (DangerCascadeController.cs:591-604).
-    public static void EnqueueWindow(Queue<bool> window, bool value)
+    // Verbatim port of DangerCascadeController.EnqueueWindow/WindowMajority (DangerCascadeController.cs:591-604),
+    // parameterized on historyLength instead of hardcoding FeatureExtractor.CRM_HISTORY_LENGTH —
+    // the live system's window is 9 cycles because its control cycle is a fixed 1s (so 9 cycles
+    // IS 9 seconds); the dummy sim's controlCycleSeconds is adjustable, so the caller
+    // (DummyBFVSwarm) derives historyLength = 9 / controlCycleSeconds to keep the window's real-
+    // world time span faithful to the live system regardless of cadence. The comparison logic
+    // itself (">" for majority, capped queue length) is unchanged.
+    public static void EnqueueWindow(Queue<bool> window, bool value, int historyLength)
     {
         window.Enqueue(value);
-        if (window.Count > FeatureExtractor.CRM_HISTORY_LENGTH)
+        if (window.Count > historyLength)
             window.Dequeue();
     }
 
-    public static bool WindowMajority(Queue<bool> window)
+    public static bool WindowMajority(Queue<bool> window, int historyLength)
     {
         int trueCount = 0;
         foreach (bool v in window)
             if (v) trueCount++;
-        return trueCount > FeatureExtractor.CRM_HISTORY_LENGTH / 2;
+        return trueCount > historyLength / 2;
     }
 
     /// <summary>
@@ -80,17 +86,18 @@ public static class DummyDangerLadderEngine
         IProbeEmitter probeEmitter, IProbeReader probeReader,
         double investigationCap, double E_t, float clearedTagDuration,
         bool dangerExtensionEnabled,
-        float currentTime)
+        float currentTime,
+        int historyLength)
     {
         // ---- Majority-vote history, exactly like FeatureExtractor.UpdateFaultStatus ----
         classificationHistory.Enqueue(fvClassification);
-        if (classificationHistory.Count > FeatureExtractor.CRM_HISTORY_LENGTH)
+        if (classificationHistory.Count > historyLength)
             classificationHistory.Dequeue();
 
         int attackCount = 0;
         foreach (int cls in classificationHistory)
             if (cls == 1) attackCount++;
-        bool majorityAttack = attackCount > FeatureExtractor.CRM_HISTORY_LENGTH / 2;
+        bool majorityAttack = attackCount > historyLength / 2;
 
         // ---- Extension off: mirror vanilla CRM's verdict exactly, ladder stays parked ----
         if (!dangerExtensionEnabled)
@@ -99,8 +106,8 @@ public static class DummyDangerLadderEngine
         }
 
         // ---- Discrepancy (Sections 4d, 7) — always on, independent of ladder state ----
-        EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc);
-        bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow);
+        EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc, historyLength);
+        bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow, historyLength);
 
         // ---- Emax for the CURRENT state, applied read-only to this cycle's verdict ----
         double Emax = GetEmaxForState(ladder.state, rawR, investigationCap);
@@ -113,8 +120,8 @@ public static class DummyDangerLadderEngine
         switch (ladder.state)
         {
             case DangerCascadeController.RobotFaultState.NORMAL:
-                EnqueueWindow(ladder.outlierWindow, rawE > rawR);
-                if (WindowMajority(ladder.outlierWindow))
+                EnqueueWindow(ladder.outlierWindow, rawE > rawR, historyLength);
+                if (WindowMajority(ladder.outlierWindow, historyLength))
                 {
                     ladder.state = DangerCascadeController.RobotFaultState.PRIMED;
                     ladder.discrepancyWindow.Clear();
@@ -122,10 +129,10 @@ public static class DummyDangerLadderEngine
                 break;
 
             case DangerCascadeController.RobotFaultState.PRIMED:
-                EnqueueWindow(ladder.discrepancyWindow, discrepancy > thetaDisc);
-                if (ladder.discrepancyWindow.Count >= FeatureExtractor.CRM_HISTORY_LENGTH)
+                EnqueueWindow(ladder.discrepancyWindow, discrepancy > thetaDisc, historyLength);
+                if (ladder.discrepancyWindow.Count >= historyLength)
                 {
-                    ladder.state = WindowMajority(ladder.discrepancyWindow)
+                    ladder.state = WindowMajority(ladder.discrepancyWindow, historyLength)
                         ? DangerCascadeController.RobotFaultState.FAULT               // sensor fault
                         : DangerCascadeController.RobotFaultState.DISCREPANCY_PASSED;
                 }
@@ -156,7 +163,19 @@ public static class DummyDangerLadderEngine
                 break;
 
             case DangerCascadeController.RobotFaultState.CLEARED:
-                if ((currentTime - ladder.clearedTime) > clearedTagDuration)
+                // DangerCascadeController uses strict "> clearedTagDuration" against continuous
+                // Time.time, where an exact tie is measure-zero and never observably occurs — so
+                // ">" vs ">=" makes no difference to the real system's behavior for any input it
+                // could actually receive. DummyBFVSwarm's currentTime is deliberately an EXACT
+                // multiple of controlCycleSeconds (to remove timing jitter — see its own docs),
+                // so when clearedTagDuration is also a multiple of controlCycleSeconds (typical
+                // for an integer-second sweep), an exact tie DOES occur here every time, and
+                // strict ">" would then always require one extra full cycle before expiring
+                // (7s duration expiring at 8s, 0s duration at 1s+, etc.) — an artifact of this
+                // dummy sim's own discretized clock, not the ported state-machine logic itself.
+                // ">=" is the correct reading of "hold for AT LEAST clearedTagDuration" once ties
+                // are actually reachable.
+                if ((currentTime - ladder.clearedTime) >= clearedTagDuration)
                 {
                     ladder.state = DangerCascadeController.RobotFaultState.NORMAL;
                     ladder.outlierWindow.Clear();
