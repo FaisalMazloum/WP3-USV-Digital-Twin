@@ -163,27 +163,33 @@ public static class DummyDangerLadderEngine
                 break;
 
             case DangerCascadeController.RobotFaultState.CLEARED:
-                // DangerCascadeController uses strict "> clearedTagDuration" against continuous
-                // Time.time, where an exact tie is measure-zero and never observably occurs — so
-                // ">" vs ">=" makes no difference to the real system's behavior for any input it
-                // could actually receive. DummyBFVSwarm's currentTime is deliberately an EXACT
-                // multiple of controlCycleSeconds (to remove timing jitter — see its own docs),
-                // so when clearedTagDuration is also a multiple of controlCycleSeconds (typical
-                // for an integer-second sweep), an exact tie DOES occur here every time, and
-                // strict ">" would then always require one extra full cycle before expiring
-                // (7s duration expiring at 8s, 0s duration at 1s+, etc.) — an artifact of this
-                // dummy sim's own discretized clock, not the ported state-machine logic itself.
-                // ">=" is the correct reading of "hold for AT LEAST clearedTagDuration" once ties
-                // are actually reachable.
-                if ((currentTime - ladder.clearedTime) >= clearedTagDuration)
-                {
-                    ladder.state = DangerCascadeController.RobotFaultState.NORMAL;
-                    ladder.outlierWindow.Clear();
-                    ladder.discrepancyWindow.Clear();
-                }
+                // Expiry is no longer checked here — see CheckClearedExpiry() below. Keeping CRM
+                // step + this switch gated to the fixed CRM cadence (1 real second, matching the
+                // live system's Wc) while letting DummyBFVSwarm poll CheckClearedExpiry() on its
+                // own finer, continuous clock means clearedTagDuration expires at the exact
+                // real-second value requested instead of being rounded to the CRM cadence grid.
                 break;
         }
 
         return verdict;
+    }
+
+    // Split out of the CLEARED case above so DummyBFVSwarm can poll it independently of Tick()'s
+    // CRM-cadence gating, on a continuous (not cycle-quantized) clock — see that call site's docs.
+    // Same comparison DangerCascadeController uses (originally strict ">"; ">=" here is still the
+    // correct reading of "hold for AT LEAST clearedTagDuration" once currentTime can land exactly
+    // on the boundary, which a continuous clock makes for real ties rather than they never
+    // occurring as with DangerCascadeController's own continuous Time.time). No-op if the ladder
+    // isn't currently CLEARED. Returns true the instant it actually expires, so the caller can log
+    // tag_expired precisely.
+    public static bool CheckClearedExpiry(LadderEntry ladder, float currentTime, float clearedTagDuration)
+    {
+        if (ladder.state != DangerCascadeController.RobotFaultState.CLEARED) return false;
+        if ((currentTime - ladder.clearedTime) < clearedTagDuration) return false;
+
+        ladder.state = DangerCascadeController.RobotFaultState.NORMAL;
+        ladder.outlierWindow.Clear();
+        ladder.discrepancyWindow.Clear();
+        return true;
     }
 }

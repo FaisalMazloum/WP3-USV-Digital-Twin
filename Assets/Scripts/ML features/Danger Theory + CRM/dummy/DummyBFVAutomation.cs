@@ -134,32 +134,25 @@ public class DummyBFVAutomation : MonoBehaviour
                 continue;
             }
 
-            var seenOffsets = new HashSet<float>(); // dedupe — multiple raw offsets can snap to the same achievable value
-
+            // Plain bounds check, no snapping needed — DummyBFVSwarm now compares the injection
+            // offset against its continuous PreciseTime clock (not a controlCycleSeconds-quantized
+            // one), so any offset in [0, duration) is reachable exactly. (Previously this rounded
+            // offsets up to the nearest controlCycleSeconds multiple and dropped infeasible ones —
+            // no longer needed now that the underlying clock isn't quantized.)
             if (useManualSweep)
             {
                 foreach (float fraction in manualInjectionOffsetFractions)
                 {
-                    float rawOffset = fraction * duration;
-                    if (!TryGetFeasibleOffset(rawOffset, duration, out float offset))
-                    {
-                        Debug.LogWarning($"DummyBFVAutomation: duration={duration}, fraction={fraction} (raw offset={rawOffset}) " +
-                            $"is not reachable before expiry at controlCycleSeconds={SwarmControlCycleSeconds} — skipped, no trial generated for it.");
-                        continue;
-                    }
-                    if (!seenOffsets.Add(offset)) continue;
+                    float offset = fraction * duration;
+                    if (offset < 0f || offset >= duration) continue;
                     grid.Add(new Combination { duration = duration, offset = offset });
                 }
             }
             else
             {
                 float safeOffsetStep = Mathf.Max(injectionOffsetStep, 0.0001f); // guards against a hang from a 0/negative step
-                for (float rawOffset = 0f; rawOffset < duration; rawOffset += safeOffsetStep)
-                {
-                    if (!TryGetFeasibleOffset(rawOffset, duration, out float offset)) continue;
-                    if (!seenOffsets.Add(offset)) continue;
+                for (float offset = 0f; offset < duration; offset += safeOffsetStep)
                     grid.Add(new Combination { duration = duration, offset = offset });
-                }
             }
         }
     }
@@ -168,24 +161,6 @@ public class DummyBFVAutomation : MonoBehaviour
     {
         for (int d = 0; d < numDurations; d++)
             yield return startClearedDuration + d * clearedDurationStep;
-    }
-
-    float SwarmControlCycleSeconds => swarm != null ? swarm.controlCycleSeconds : 1f;
-
-    // swarm.SimTime (what the injection-firing check in FixedUpdate() compares combo.offset
-    // against) only ever advances in whole controlCycleSeconds steps — it never actually equals
-    // an arbitrary fractional value. A raw offset that doesn't land on that grid (e.g. 0.75 * a
-    // 2s duration = 1.5s, when the elapsed-since-CLEARED clock only ever reads 0, 1, 2, ...) would
-    // otherwise silently never inject: the check first becomes true at the next reachable value
-    // ABOVE the raw offset, and if that's already >= duration, the CLEARED window has already
-    // closed before the condition was ever satisfied. Rounding up to the nearest reachable value
-    // here — and dropping the combination if that snaps at or past duration — means every
-    // generated combination is guaranteed to actually fire, instead of some silently never doing so.
-    bool TryGetFeasibleOffset(float rawOffset, float duration, out float feasibleOffset)
-    {
-        float cc = Mathf.Max(SwarmControlCycleSeconds, 0.0001f);
-        feasibleOffset = Mathf.Ceil(rawOffset / cc) * cc;
-        return feasibleOffset >= 0f && feasibleOffset < duration;
     }
 
     void FixedUpdate()
@@ -230,16 +205,18 @@ public class DummyBFVAutomation : MonoBehaviour
         // Fire the injection once this robot has been CLEARED for >= this combination's offset,
         // and only while still inside that CLEARED window (never after expiry). Gated on
         // enableInjectionSweep so no fault is ever injected in that mode, regardless of combo.offset.
+        // Uses swarm.PreciseTime (continuous), not the CRM-cadence-quantized SimTime, so decimal
+        // offsets fire at the exact real-second value requested.
         if (enableInjectionSweep && !injectedThisExperiment
             && swarm.lastClearedTime.TryGetValue(trackedRobotId, out float clearedAt))
         {
-            float elapsedSinceCleared = swarm.SimTime - clearedAt;
+            float elapsedSinceCleared = swarm.PreciseTime - clearedAt;
             if (elapsedSinceCleared >= combo.offset && elapsedSinceCleared < combo.duration)
             {
                 swarm.faultInjector.selectedFault = FaultInjector.FaultType.SoftwareHang;
                 swarm.faultInjector.injectFault = true;
                 injectedThisExperiment = true;
-                Debug.Log($"DummyBFVAutomation: [combo {CurrentCombinationIndex}/{grid.Count}, D={combo.duration}, offset={combo.offset}] injected SoftwareHang on robot {trackedRobotId} at sim_time={swarm.SimTime:F2}.");
+                Debug.Log($"DummyBFVAutomation: [combo {CurrentCombinationIndex}/{grid.Count}, D={combo.duration}, offset={combo.offset}] injected SoftwareHang on robot {trackedRobotId} at sim_time={swarm.PreciseTime:F2}.");
             }
         }
 

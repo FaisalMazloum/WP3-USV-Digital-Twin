@@ -184,7 +184,7 @@ MonoBehaviour:
   faultInjector: {fileID: 1970658656}
   clearedTagDuration: 20
   probeWindowT: 3
-  controlCycleSeconds: 0.5
+  controlCycleSeconds: 1
   dangerExtensionEnabled: 1
   investigationCap: 1
   E_t: 2
@@ -229,22 +229,24 @@ MonoBehaviour:
   useManualSweep: 1
   startClearedDuration: 0
   clearedDurationStep: 5
-  numDurations: 20
+  numDurations: 23
   manualClearedDurations:
+  - 0
   - 2
   - 6
   - 10
   - 20
   - 40
   - 70
+  - 100
   enableInjectionSweep: 1
   injectionOffsetStep: 2
   manualInjectionOffsetFractions:
-  - 0
-  - 0.25
+  - 0.1
+  - 0.3
   - 0.5
-  - 0.75
-  - 1
+  - 0.7
+  - 0.9
   stopOnClassification: 1
   maxCyclesPerExperiment: 100
   T_run: 300
