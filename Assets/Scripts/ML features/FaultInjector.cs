@@ -278,14 +278,14 @@ public class FaultInjector : MonoBehaviour
     // }
 
     // ==================== TAKE ALL TOP 5 =======================
-    public void SetFaultyRobot()
+    public void SetFaultyRobotRandom()
     {
         GameObject[] allRobots = GameObject.FindGameObjectsWithTag("remora_bot");
         faulty_robots.Clear();
 
         // Use LINQ to shuffle the array and take 5 random entries
         var randomRobots = allRobots
-            .OrderBy(x => UnityEngine.Random.value) 
+            .OrderBy(x => UnityEngine.Random.value)
             .Take(Mathf.Min(5, allRobots.Length)) // Ensure no crash if there are < 5 robots
             .ToList();
 
@@ -294,5 +294,14 @@ public class FaultInjector : MonoBehaviour
             faulty_robots.Add(robot.name);
             // Debug.Log($"Randomly selected faulty robot: {robot.name}");
         }
+    }
+
+    // Deterministic counterpart to SetFaultyRobotRandom() above — picks exactly one robot by its
+    // spawn index (RobotSpawner names robots "remora{i}", see RobotSpawner.cs) instead of a random
+    // top-5 set, for when you want a specific, repeatable robot to be faulty.
+    public void SetFaultyRobot(int robotNumber)
+    {
+        faulty_robots.Clear();
+        faulty_robots.Add($"remora{robotNumber}");
     }
 }

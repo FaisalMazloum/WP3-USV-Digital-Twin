@@ -58,7 +58,7 @@ public class DangerCascadeController : MonoBehaviour
     // either wheel counts as a discrepancy this cycle. Below actuatorIntentFloorCm, intent isn't
     // large enough to divide by meaningfully (e.g. commanded to sit still), so that wheel is
     // skipped for the cycle rather than letting noise/residual momentum blow up to a huge ratio.
-    public float actuatorTolerance = 0.1f;
+    private float actuatorTolerance = 0.8f;
     const float actuatorIntentFloorCm = 1f;
 
     // Note: Nmin/Nmax/T (Section 6) are NOT duplicated here — each robot's own BlinkEmitter
@@ -71,10 +71,21 @@ public class DangerCascadeController : MonoBehaviour
     [Header("Wiring")]
     public FeatureExtractor featureExtractor;
     public FaultInjector faultInjector; // optional — only used for the CSV ground-truth label column
+    // Optional, only used for the CSV "seed" column — auto-found (lazily, cached) if left
+    // unassigned, mirroring swarmConsensus's own auto-find fallback above.
+    public RobotSpawner robotSpawner;
     // Optional. Leave unassigned to keep the original purely-per-observer behavior (no verdict
     // syncing — ladder entry is always single-observer-triggered regardless). Auto-found (and
     // retried each FixedUpdate until found) if left empty. See SwarmConsensusCoordinator.cs.
     public SwarmConsensusCoordinator swarmConsensus;
+
+    // Gates CSV row logging independently of featureExtractor._csvExporter._start (which flips
+    // true automatically ~2s after spawn, via SpawnerUI — too early if you want a clean healthy-
+    // swarm baseline before logging begins). Mirrors GlobalCSVExporter.startCollection: set once
+    // (e.g. by automation.cs, at whatever offset you choose) and stays true — never auto-resets.
+    // The ladder/CRM state machine itself still runs every cycle regardless of this flag; only
+    // whether a row gets appended to the CSV buffers is gated by it.
+    public bool startLogging = false;
     public bool exportCSV = false;
     public bool logStateTransitions = false; // Console.Log every ladder state change, for testing
 
@@ -139,6 +150,13 @@ public class DangerCascadeController : MonoBehaviour
 
     private StringBuilder csvBuffer = new StringBuilder();
     private bool csvHeaderWritten = false;
+
+    // Vanilla-CRM and CRM-DT vote logs — separate CSVs, same buffering/flush pattern as
+    // csvBuffer/csvHeaderWritten above, flushed together with it on the same exportCSV button.
+    private StringBuilder vanillaVotesCsvBuffer = new StringBuilder();
+    private bool vanillaVotesCsvHeaderWritten = false;
+    private StringBuilder dtVotesCsvBuffer = new StringBuilder();
+    private bool dtVotesCsvHeaderWritten = false;
 
     void Start()
     {
@@ -229,6 +247,8 @@ public class DangerCascadeController : MonoBehaviour
         {
             exportCSV = false;
             FlushCsv();
+            FlushVanillaVotesCsv();
+            FlushDtVotesCsv();
         }
     }
 
@@ -257,7 +277,7 @@ public class DangerCascadeController : MonoBehaviour
     // =========================================================================
     void RunDangerCycle()
     {
-        bool loggingActive = featureExtractor._csvExporter != null && featureExtractor._csvExporter._start;
+        bool loggingActive = startLogging && featureExtractor._csvExporter != null && featureExtractor._csvExporter._start;
 
         foreach (var kvp in featureExtractor.feature_list_history)
         {
@@ -294,6 +314,11 @@ public class DangerCascadeController : MonoBehaviour
             foreach (int cls in classificationHistory)
                 if (cls == 1) attackCount++;
             bool majorityAttack = attackCount > FeatureExtractor.CRM_HISTORY_LENGTH / 2;
+
+            // Vanilla CRM's vote — always available regardless of dangerExtensionEnabled, matching
+            // that majorityAttack itself is computed unconditionally above.
+            if (loggingActive)
+                AppendVanillaVoteRow(observedRobot, fvIndex, majorityAttack);
 
             // ---- Extension off: mirror vanilla CRM's verdict exactly (majority vote, same as
             //      FeatureExtractor.isFaulty), ladder stays parked ----
@@ -443,13 +468,20 @@ public class DangerCascadeController : MonoBehaviour
                     break;
 
                 case RobotFaultState.CLEARED:
-                    // Purely time-based expiry, deliberately no BFV re-challenge (removed per your
-                    // call) — a CLEARED tag holds for the full clearedTagDuration regardless of
-                    // behavior change, for both independently-earned and adopted CLEARED alike.
+                    // Resume feeding outlierWindow while CLEARED (still frozen during
+                    // PRIMED/DISCREPANCY_PASSED/PROBING — unread there anyway). If the underlying
+                    // BFV pattern never actually stopped being an outlier, this window already
+                    // shows that the instant the tag expires, so NORMAL re-triggers PRIMED on the
+                    // very next cycle instead of silently sitting at NORMAL for up to 9 more cycles
+                    // while an empty window rebuilds from scratch.
+                    EnqueueWindow(ladder.outlierWindow, rawE > rawR);
+
+                    // Purely time-based expiry — a CLEARED tag holds for the full
+                    // clearedTagDuration regardless of behavior change, for both
+                    // independently-earned and adopted CLEARED alike.
                     if ((Time.time - ladder.clearedTime) > clearedTagDuration)
                     {
                         ladder.state = RobotFaultState.NORMAL;
-                        ladder.outlierWindow.Clear();
                         ladder.discrepancyWindow.Clear();
                     }
                     break;
@@ -472,7 +504,27 @@ public class DangerCascadeController : MonoBehaviour
             }
 
             if (loggingActive)
+            {
                 AppendCsvRow(observedRobot, fvIndex, discrepancy, ladder.state, Emax, rawE, rawR, probeResult, verdict);
+
+                // CRM-DT's vote — post-switch ladder.state (matching AppendCsvRow's own "state"
+                // column above, which is also post-switch, even though the live-display
+                // currentState/finalVerdict dictionaries elsewhere use the pre-switch value).
+                // discrepancyMajority overrides toward "1" even mid-investigation (that's its whole
+                // purpose — Section 7); absence of it never asserts "0" on its own, only a fully
+                // completed NORMAL does.
+                string dtVote;
+                if (discrepancyMajority)
+                    dtVote = "1";
+                else if (ladder.state == RobotFaultState.FAULT)
+                    dtVote = "1";
+                else if (ladder.state == RobotFaultState.NORMAL)
+                    dtVote = "0";
+                else
+                    dtVote = "NA";
+
+                AppendDtVoteRow(observedRobot, fvIndex, dtVote);
+            }
         }
 
         // Clean up robots no longer observed — mirrors FeatureExtractor.UpdateFaultStatus.
@@ -605,12 +657,35 @@ public class DangerCascadeController : MonoBehaviour
 
     // ================================= CSV (Section 10) =================================
 
+    // Lazily found and cached (RobotSpawner lives on a separate scene object, not this robot's
+    // prefab, so it can't be wired at prefab-authoring time) — same int all three CSVs' "seed"
+    // column reads, matching GlobalCSVExporter's own per-row "seed" column convention.
+    int GetSeed()
+    {
+        if (robotSpawner == null)
+            robotSpawner = FindObjectOfType<RobotSpawner>();
+        return robotSpawner != null ? robotSpawner.randomSeed : -1;
+    }
+
+    // Extracted from AppendCsvRow's own inline computation (unchanged behavior) so the two
+    // vanilla/DT vote CSVs below can reuse the exact same ground-truth lookup.
+    string GetGroundTruthLabel(GameObject observedRobot)
+    {
+        if (faultInjector != null && faultInjector.injectFault
+            && faultInjector.selectedFault != FaultInjector.FaultType.None
+            && faultInjector.faulty_robots.Contains(observedRobot.name))
+        {
+            return faultInjector.selectedFault.ToString();
+        }
+        return "None";
+    }
+
     void AppendCsvRow(GameObject observedRobot, int fvIndex, float discrepancy, RobotFaultState state,
         double Emax, double rawE, double rawR, ProbeResult probeResult, bool verdict)
     {
         if (!csvHeaderWritten)
         {
-            csvBuffer.AppendLine("observer_id,robot_id,timestamp,BFV,A_j,affinity_to_nearest_tolerated,"
+            csvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,A_j,affinity_to_nearest_tolerated,"
                 + "self_reported_neighbors,true_neighbors,discrepancy,state,Emax,E,R,probe_result,final_verdict,ground_truth_label");
             csvHeaderWritten = true;
         }
@@ -630,19 +705,14 @@ public class DangerCascadeController : MonoBehaviour
             trueCount = rabSensor.GetTrueNeighborCount();
         }
 
-        string groundTruthLabel = "None";
-        if (faultInjector != null && faultInjector.injectFault
-            && faultInjector.selectedFault != FaultInjector.FaultType.None
-            && faultInjector.faulty_robots.Contains(observedRobot.name))
-        {
-            groundTruthLabel = faultInjector.selectedFault.ToString();
-        }
+        string groundTruthLabel = GetGroundTruthLabel(observedRobot);
 
         string probeResultCsv = probeResult == ProbeResult.Pass ? "PASS"
             : probeResult == ProbeResult.Fail ? "FAIL"
             : "NA";
 
         csvBuffer.AppendLine(string.Join(",",
+            GetSeed().ToString(),
             transform.root.name,
             observedRobot.name,
             Time.time.ToString("F2"),
@@ -659,6 +729,46 @@ public class DangerCascadeController : MonoBehaviour
             probeResultCsv,
             verdict ? "1" : "0",
             groundTruthLabel));
+    }
+
+    // Vanilla CRM's vote — always "1"/"0" (majorityAttack), no state machine to withhold judgment.
+    void AppendVanillaVoteRow(GameObject observedRobot, int fvIndex, bool vote)
+    {
+        if (!vanillaVotesCsvHeaderWritten)
+        {
+            vanillaVotesCsvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label");
+            vanillaVotesCsvHeaderWritten = true;
+        }
+
+        vanillaVotesCsvBuffer.AppendLine(string.Join(",",
+            GetSeed().ToString(),
+            transform.root.name,
+            observedRobot.name,
+            Time.time.ToString("F2"),
+            fvIndex.ToString(),
+            vote ? "1" : "0",
+            GetGroundTruthLabel(observedRobot)));
+    }
+
+    // CRM-DT's vote — "1"/"0"/"NA". Caller derives which (see RunDangerCycle): NA while
+    // PRIMED/DISCREPANCY_PASSED/PROBING/CLEARED (still investigating or coasting on a stale
+    // probe), "0" only once genuinely NORMAL, "1" if FAULT or the always-on discrepancy arm fired.
+    void AppendDtVoteRow(GameObject observedRobot, int fvIndex, string vote)
+    {
+        if (!dtVotesCsvHeaderWritten)
+        {
+            dtVotesCsvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label");
+            dtVotesCsvHeaderWritten = true;
+        }
+
+        dtVotesCsvBuffer.AppendLine(string.Join(",",
+            GetSeed().ToString(),
+            transform.root.name,
+            observedRobot.name,
+            Time.time.ToString("F2"),
+            fvIndex.ToString(),
+            vote,
+            GetGroundTruthLabel(observedRobot)));
     }
 
     void FlushCsv()
@@ -680,5 +790,39 @@ public class DangerCascadeController : MonoBehaviour
 
         csvBuffer.Clear();
         csvHeaderWritten = false;
+    }
+
+    void FlushVanillaVotesCsv()
+    {
+        if (vanillaVotesCsvBuffer.Length == 0) return; // not an error — DT-only runs won't populate this
+
+        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+        string filename = $"{transform.root.name} - vanilla_votes - {timestamp}.csv";
+        string dir = Path.Combine(Application.dataPath, "Scripts", "data", "latest_data", "Danger");
+        Directory.CreateDirectory(dir);
+        string filepath = Path.Combine(dir, filename);
+
+        File.WriteAllText(filepath, vanillaVotesCsvBuffer.ToString());
+        Debug.LogError($"{transform.root.name}: DangerCascadeController exported vanilla vote CSV to:\n{filepath}");
+
+        vanillaVotesCsvBuffer.Clear();
+        vanillaVotesCsvHeaderWritten = false;
+    }
+
+    void FlushDtVotesCsv()
+    {
+        if (dtVotesCsvBuffer.Length == 0) return; // not an error — only populated when dangerExtensionEnabled is true
+
+        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+        string filename = $"{transform.root.name} - dt_votes - {timestamp}.csv";
+        string dir = Path.Combine(Application.dataPath, "Scripts", "data", "latest_data", "Danger");
+        Directory.CreateDirectory(dir);
+        string filepath = Path.Combine(dir, filename);
+
+        File.WriteAllText(filepath, dtVotesCsvBuffer.ToString());
+        Debug.LogError($"{transform.root.name}: DangerCascadeController exported DT vote CSV to:\n{filepath}");
+
+        dtVotesCsvBuffer.Clear();
+        dtVotesCsvHeaderWritten = false;
     }
 }

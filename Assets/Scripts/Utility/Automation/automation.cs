@@ -14,13 +14,13 @@ public class AutomatedDataCollection : MonoBehaviour
     [SerializeField] private bool autoStart = false;
     
     [Header("Timing Parameters (seconds)")]
-    [SerializeField] private float initialWait;          // Wait after play starts (ORIGINALLY 5s, but .sh takes 2.5s to setup) for .SH and Unity to Sync
-    [SerializeField] private float postSpawnWait;          // Wait after spawning robots (must be > 5s due to SpawnerUI internal delays)
-    [SerializeField] private float ROS2Wait;              // Wait for ALL ROS2 to fully launch
-    [SerializeField] private float stabalizePeriod;       // After spawning, allow period for stabalizing
-    [SerializeField] private float postStartCollectionWait;         // Wait after start collection
-    [SerializeField] private float postFaultWait;         // Wait after fault injection
-    [SerializeField] private float sceneReloadWait;        // Wait for scene to reload
+    private float initialWait;          // Wait after play starts (ORIGINALLY 5s, but .sh takes 2.5s to setup) for .SH and Unity to Sync
+    private float postSpawnWait;          // Wait after spawning robots (must be > 5s due to SpawnerUI internal delays)
+    private float ROS2Wait;              // Wait for ALL ROS2 to fully launch
+    private float stabalizePeriod;       // After spawning, allow period for stabalizing
+    private float postStartCollectionWait;         // Wait after start collection
+    private float postFaultWait;         // Wait after fault injection
+    private float sceneReloadWait;        // Wait for scene to reload
     
     private void Start()
     {
@@ -44,15 +44,25 @@ public class AutomatedDataCollection : MonoBehaviour
         // postFaultWait = 200f;
         // sceneReloadWait = 10f;
 
-// ================ MISC TEST ================
+// // ================ MISC TEST ================
+//         initialWait = 10f;
+//         postSpawnWait = 5f;
+//         postSpawnWait = 5f;
+//         ROS2Wait = 5f;
+        stabalizePeriod = -1f;
+        postStartCollectionWait = -1f;
+        postFaultWait = -1f;
+        sceneReloadWait = -1f;
+
+// ================ T-RO TEST ================
         initialWait = 10f;
         postSpawnWait = 5f;
         postSpawnWait = 5f;
         ROS2Wait = 5f;
-        stabalizePeriod = -1f;   // doesnt need stabalization period since it is random_walk
-        postStartCollectionWait = -1f;     //
-        postFaultWait = -1f;
-        sceneReloadWait = -1f;
+        // stabalizePeriod = 10f;
+        // postStartCollectionWait = 30f;     // to collect samples before fault injection
+        // postFaultWait = 30f;               // to collect samples after fault injection
+        // sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
 
 // ================ Quick Testing ================
         // initialWait = 1.5f;
@@ -114,10 +124,12 @@ public class AutomatedDataCollection : MonoBehaviour
         // ===========================================
         if(stabalizePeriod != -1f)
         {
-            Debug.Log("[DataCollection] Starting collection...");
-            faultInjector.SetFaultyRobot(); // Randomly select faulty robot
+            Debug.Log("[DataCollection] Finished stabalizing. Starting collection...");
+            // faultInjector.SetFaultyRobotRandom(); // Randomly select faulty robot(s)
+            faultInjector.SetFaultyRobot(0);
             TriggerBooleanField(globalCSVExporter, "startCollection");
-            yield return new WaitForSeconds(postStartCollectionWait);   
+            TriggerDangerCascadeStartLogging();
+            yield return new WaitForSeconds(postStartCollectionWait); // this waiting period is to allow the CSV to log data for a fully healthy swarm for the initial period (before injection)
         }
         
         // ===========================================
@@ -125,13 +137,19 @@ public class AutomatedDataCollection : MonoBehaviour
         // ===========================================
         if(postStartCollectionWait != -1f)
         {
-            Debug.Log("[DataCollection] Injecting fault...");
+            Debug.Log("[DataCollection] Injected fault...");
             TriggerBooleanField(faultInjector, "injectFault");
             yield return new WaitForSeconds(postFaultWait);
             
-            yield return new WaitForSeconds(sceneReloadWait);
-            
+
+        // ===========================================
+        // Step 5: Export DangerCascadeController CSVs (danger log + vanilla/DT vote logs)
+        // ===========================================
+            Debug.Log("[DataCollection] Exporting DangerCascadeController CSVs...");
+            TriggerDangerCascadeExport();
             Debug.Log($"[DataCollection] All {numberOfRuns} runs completed!");
+
+            yield return new WaitForSeconds(sceneReloadWait);
             
             #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
@@ -174,6 +192,38 @@ public class AutomatedDataCollection : MonoBehaviour
         }
     }
     
+    // Mirrors TriggerBooleanField(globalCSVExporter, "startCollection") above, but for every
+    // DangerCascadeController in the scene (per-robot, no single field to hold a reference to —
+    // see TriggerDangerCascadeExport below). Flips startLogging true on each so CSV row logging
+    // begins at this exact offset instead of ~2s after spawn (when featureExtractor._csvExporter
+    // ._start flips automatically) — same "healthy baseline before logging starts" intent as
+    // globalCSVExporter's own startCollection trigger just above.
+    private void TriggerDangerCascadeStartLogging()
+    {
+        DangerCascadeController[] controllers = FindObjectsOfType<DangerCascadeController>();
+        foreach (var controller in controllers)
+        {
+            TriggerBooleanField(controller, "startLogging");
+        }
+        Debug.Log($"[DataCollection] Triggered startLogging on {controllers.Length} DangerCascadeController(s).");
+    }
+
+    // DangerCascadeController is per-robot (one instance per spawned robot), unlike
+    // globalCSVExporter/faultInjector which are single scene-wide references this script already
+    // holds — so there's no single field to drag into the Inspector. Find every instance at
+    // trigger-time and flip exportCSV on each via the same reflection-based TriggerBooleanField
+    // used for startCollection/injectFault above, so all robots flush their danger/vote CSVs
+    // together right before the scene stops.
+    private void TriggerDangerCascadeExport()
+    {
+        DangerCascadeController[] controllers = FindObjectsOfType<DangerCascadeController>();
+        foreach (var controller in controllers)
+        {
+            TriggerBooleanField(controller, "exportCSV");
+        }
+        Debug.Log($"[DataCollection] Triggered CSV export on {controllers.Length} DangerCascadeController(s).");
+    }
+
     private void TriggerBooleanField(MonoBehaviour target, string fieldName)
     {
         if (target == null)
