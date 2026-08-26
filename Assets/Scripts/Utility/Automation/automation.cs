@@ -49,20 +49,20 @@ public class AutomatedDataCollection : MonoBehaviour
 //         postSpawnWait = 5f;
 //         postSpawnWait = 5f;
 //         ROS2Wait = 5f;
-        stabalizePeriod = -1f;
-        postStartCollectionWait = -1f;
-        postFaultWait = -1f;
-        sceneReloadWait = -1f;
+        // stabalizePeriod = -1f;
+        // postStartCollectionWait = -1f;
+        // postFaultWait = -1f;
+        // sceneReloadWait = -1f;
 
 // ================ T-RO TEST ================
         initialWait = 10f;
         postSpawnWait = 5f;
         postSpawnWait = 5f;
         ROS2Wait = 5f;
-        // stabalizePeriod = 10f;
-        // postStartCollectionWait = 30f;     // to collect samples before fault injection
-        // postFaultWait = 30f;               // to collect samples after fault injection
-        // sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
+        stabalizePeriod = 30f;
+        postStartCollectionWait = 150f;     // to collect samples before fault injection
+        postFaultWait = 150f;               // to collect samples after fault injection
+        sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
 
 // ================ Quick Testing ================
         // initialWait = 1.5f;
@@ -208,20 +208,14 @@ public class AutomatedDataCollection : MonoBehaviour
         Debug.Log($"[DataCollection] Triggered startLogging on {controllers.Length} DangerCascadeController(s).");
     }
 
-    // DangerCascadeController is per-robot (one instance per spawned robot), unlike
-    // globalCSVExporter/faultInjector which are single scene-wide references this script already
-    // holds — so there's no single field to drag into the Inspector. Find every instance at
-    // trigger-time and flip exportCSV on each via the same reflection-based TriggerBooleanField
-    // used for startCollection/injectFault above, so all robots flush their danger/vote CSVs
-    // together right before the scene stops.
+    // DangerCascadeController's CSV export is now swarm-consolidated (one danger/vanilla_votes/
+    // dt_votes file covering every observer, not one per robot) — so exporting is a single static
+    // call, no per-instance reflection loop needed (unlike startLogging above, which genuinely is
+    // a per-robot flag each instance's own RunDangerCycle checks).
     private void TriggerDangerCascadeExport()
     {
-        DangerCascadeController[] controllers = FindObjectsOfType<DangerCascadeController>();
-        foreach (var controller in controllers)
-        {
-            TriggerBooleanField(controller, "exportCSV");
-        }
-        Debug.Log($"[DataCollection] Triggered CSV export on {controllers.Length} DangerCascadeController(s).");
+        DangerCascadeController.FlushAllConsolidated();
+        Debug.Log("[DataCollection] Triggered swarm-consolidated DangerCascadeController CSV export.");
     }
 
     private void TriggerBooleanField(MonoBehaviour target, string fieldName)

@@ -59,17 +59,17 @@ public class SwarmConsensusCoordinator : MonoBehaviour
             && canonicalState.TryGetValue(target, out var existing)
             && existing == DangerCascadeController.RobotFaultState.FAULT)
         {
-            if (logVerbose)
-                Debug.Log($"SwarmConsensusCoordinator: ignored CLEARED broadcast for {target.name} — already FAULT.");
+            // if (logVerbose)
+            //     Debug.Log($"SwarmConsensusCoordinator: ignored CLEARED broadcast for {target.name} — already FAULT.");
             return;
         }
 
         canonicalState[target] = state;
         canonicalTime[target] = time;
 
-        if (logVerbose)
-            Debug.Log($"SwarmConsensusCoordinator: broadcast {target.name} -> {state} at t={time:F1} " +
-                $"(instance {GetInstanceID()}, {canonicalState.Count} targets tracked).");
+        // if (logVerbose)
+        //     Debug.Log($"SwarmConsensusCoordinator: broadcast {target.name} -> {state} at t={time:F1} " +
+        //         $"(instance {GetInstanceID()}, {canonicalState.Count} targets tracked).");
     }
 
     /// <summary> The swarm-wide conclusion for target, if any observer has reached one yet. </summary>

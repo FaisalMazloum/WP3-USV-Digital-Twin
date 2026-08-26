@@ -62,11 +62,11 @@ public class RobotSpawner : MonoBehaviour
                 Debug.Log($"[RobotSpawner] Seed set from file: {randomSeed}");
             }
         }
-        else if (randomSeed == 0)
-        {
-            randomSeed = Random.Range(40, 500);
-            Debug.Log($"[RobotSpawner] Using random seed: {randomSeed}");
-        }
+        // else if (randomSeed == 0)
+        // {
+        //     randomSeed = Random.Range(40, 500);
+        //     Debug.Log($"[RobotSpawner] Using random seed: {randomSeed}");
+        // }
 
 
         // spacing = 1f;

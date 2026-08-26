@@ -11,12 +11,16 @@ using UnityEngine;
 /// different verdicts about the same robot).
 ///
 /// Drives CRMInstanceDanger every sample cycle, reusing FeatureExtractor.lastFvCounts so the
-/// fvCounts-building loop isn't duplicated. When dangerExtensionEnabled is false, this produces
-/// exactly the same FVClassification-based verdict vanilla CRM would (CRMInstanceDanger's raw
-/// output never depends on the flag at all — see that class). Only when true does this also run
-/// the always-on discrepancy arm (Section 7) and the per-observed-robot effector cap ladder /
-/// state machine (Section 5), transitions gated by the same rolling-window-majority approach
-/// vanilla CRM already uses (FeatureExtractor.CRM_HISTORY_LENGTH) — Section 2.
+/// fvCounts-building loop isn't duplicated. The vanilla-CRM verdict/vote, however, is read
+/// directly off FeatureExtractor's own crmInstance (the real vanilla engine, hardcoded
+/// c=0.20 — see CRMInstance.cs) rather than off CRMInstanceDanger, so it stays a genuinely
+/// independent classifier from whatever c/pi_E/pi_R you're currently sweeping on
+/// CRMInstanceDanger for the DT arm below. When dangerExtensionEnabled is false, this class's
+/// verdict is exactly that vanilla verdict; only when true does it also run the always-on
+/// discrepancy arm (Section 7) and the per-observed-robot effector cap ladder / state machine
+/// (Section 5) on top of CRMInstanceDanger's own separate E/R dynamics, transitions gated by
+/// the same rolling-window-majority approach vanilla CRM already uses
+/// (FeatureExtractor.CRM_HISTORY_LENGTH) — Section 2.
 /// </summary>
 public class DangerCascadeController : MonoBehaviour
 {
@@ -31,7 +35,7 @@ public class DangerCascadeController : MonoBehaviour
 
     [Header("CRM parameter passthrough (Section 8) — defaults match vanilla CRM's consts exactly")]
     // public double c = 0.20;
-    public double c = 0.11;
+    public double c = 0.0;
     public double pi_E = 1e-3;
     public double pi_R = 0.7e-3;
 
@@ -148,15 +152,16 @@ public class DangerCascadeController : MonoBehaviour
     private float startTime;
     private bool warnedMissingCoordinator = false;
 
+    // Rows only — no header line (the swarm-consolidated file gets exactly one header, written
+    // once by FlushAllConsolidated; see the CSV section below). Per-instance: each robot's own
+    // observations, merged across all robots at flush time so the output CSVs cover the whole
+    // swarm instead of one file per observer.
     private StringBuilder csvBuffer = new StringBuilder();
-    private bool csvHeaderWritten = false;
 
-    // Vanilla-CRM and CRM-DT vote logs — separate CSVs, same buffering/flush pattern as
-    // csvBuffer/csvHeaderWritten above, flushed together with it on the same exportCSV button.
+    // Vanilla-CRM and CRM-DT vote logs — same per-instance/consolidated-at-flush pattern as
+    // csvBuffer above.
     private StringBuilder vanillaVotesCsvBuffer = new StringBuilder();
-    private bool vanillaVotesCsvHeaderWritten = false;
     private StringBuilder dtVotesCsvBuffer = new StringBuilder();
-    private bool dtVotesCsvHeaderWritten = false;
 
     void Start()
     {
@@ -246,9 +251,7 @@ public class DangerCascadeController : MonoBehaviour
         if (exportCSV)
         {
             exportCSV = false;
-            FlushCsv();
-            FlushVanillaVotesCsv();
-            FlushDtVotesCsv();
+            FlushAllConsolidated();
         }
     }
 
@@ -301,12 +304,20 @@ public class DangerCascadeController : MonoBehaviour
             // ---- Majority-vote history, exactly like FeatureExtractor.UpdateFaultStatus ----
             // Maintained unconditionally (not just when the ladder is active) so it's always a
             // valid stand-in for what vanilla CRM's isFaulty would show for this same FV stream.
+            //
+            // Reads featureExtractor.crmInstance (the REAL vanilla CRM engine FeatureExtractor
+            // itself already runs, hardcoded c=0.20 — see CRMInstance.cs) rather than
+            // crmInstanceDanger (this class's own copy, whose c/pi_E/pi_R are Inspector-tunable
+            // for DT experimentation). Reusing FeatureExtractor's own engine means vanilla's
+            // reported vote can never be silently pulled off its true constants by whatever c
+            // you're currently sweeping for the DT arm below — the two are now genuinely
+            // independent classifiers, not two views of the same tuned engine.
             if (!crmHistory.TryGetValue(observedRobot, out Queue<int> classificationHistory))
             {
                 classificationHistory = new Queue<int>();
                 crmHistory[observedRobot] = classificationHistory;
             }
-            classificationHistory.Enqueue(crmInstanceDanger.FVClassification[fvIndex]);
+            classificationHistory.Enqueue(featureExtractor.crmInstance.FVClassification[fvIndex]);
             if (classificationHistory.Count > FeatureExtractor.CRM_HISTORY_LENGTH)
                 classificationHistory.Dequeue();
 
@@ -657,6 +668,13 @@ public class DangerCascadeController : MonoBehaviour
 
     // ================================= CSV (Section 10) =================================
 
+    // Written once per consolidated file (see FlushAllConsolidated) rather than once per
+    // instance — every robot's AppendCsvRow/AppendVanillaVoteRow/AppendDtVoteRow below writes
+    // only data rows into its own buffer, never a header line.
+    private const string DangerCsvHeader = "seed,arena_size,observer_id,robot_id,timestamp,BFV,A_j,affinity_to_nearest_tolerated,"
+        + "self_reported_neighbors,true_neighbors,discrepancy,state,Emax,E,R,probe_result,final_verdict,ground_truth_label";
+    private const string VoteCsvHeader = "seed,arena_size,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label";
+
     // Lazily found and cached (RobotSpawner lives on a separate scene object, not this robot's
     // prefab, so it can't be wired at prefab-authoring time) — same int all three CSVs' "seed"
     // column reads, matching GlobalCSVExporter's own per-row "seed" column convention.
@@ -665,6 +683,23 @@ public class DangerCascadeController : MonoBehaviour
         if (robotSpawner == null)
             robotSpawner = FindObjectOfType<RobotSpawner>();
         return robotSpawner != null ? robotSpawner.randomSeed : -1;
+    }
+
+    // Finds whichever root-level "Experiment Environment - {suffix}" GameObject is currently
+    // active in the scene (you toggle between "- S"/"- M"/"- L"/"- XL" by hand) and returns just
+    // the suffix. Root objects only (not GameObject.Find, which requires an exact name and can't
+    // do a prefix match) — inactive siblings are skipped automatically since GetRootGameObjects()
+    // still returns them but activeSelf filters them out here.
+    static string GetArenaSize()
+    {
+        const string prefix = "Experiment Environment - ";
+        var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+        foreach (var root in roots)
+        {
+            if (root.activeSelf && root.name.StartsWith(prefix))
+                return root.name.Substring(prefix.Length);
+        }
+        return "Unknown";
     }
 
     // Extracted from AppendCsvRow's own inline computation (unchanged behavior) so the two
@@ -683,13 +718,6 @@ public class DangerCascadeController : MonoBehaviour
     void AppendCsvRow(GameObject observedRobot, int fvIndex, float discrepancy, RobotFaultState state,
         double Emax, double rawE, double rawR, ProbeResult probeResult, bool verdict)
     {
-        if (!csvHeaderWritten)
-        {
-            csvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,A_j,affinity_to_nearest_tolerated,"
-                + "self_reported_neighbors,true_neighbors,discrepancy,state,Emax,E,R,probe_result,final_verdict,ground_truth_label");
-            csvHeaderWritten = true;
-        }
-
         int Aj = featureExtractor.lastFvCounts.TryGetValue(fvIndex, out int count) ? count : 0;
 
         // Affinity from this FV to the nearest cluster CRM currently classifies as tolerated.
@@ -713,6 +741,7 @@ public class DangerCascadeController : MonoBehaviour
 
         csvBuffer.AppendLine(string.Join(",",
             GetSeed().ToString(),
+            GetArenaSize(),
             transform.root.name,
             observedRobot.name,
             Time.time.ToString("F2"),
@@ -734,14 +763,9 @@ public class DangerCascadeController : MonoBehaviour
     // Vanilla CRM's vote — always "1"/"0" (majorityAttack), no state machine to withhold judgment.
     void AppendVanillaVoteRow(GameObject observedRobot, int fvIndex, bool vote)
     {
-        if (!vanillaVotesCsvHeaderWritten)
-        {
-            vanillaVotesCsvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label");
-            vanillaVotesCsvHeaderWritten = true;
-        }
-
         vanillaVotesCsvBuffer.AppendLine(string.Join(",",
             GetSeed().ToString(),
+            GetArenaSize(),
             transform.root.name,
             observedRobot.name,
             Time.time.ToString("F2"),
@@ -755,14 +779,9 @@ public class DangerCascadeController : MonoBehaviour
     // probe), "0" only once genuinely NORMAL, "1" if FAULT or the always-on discrepancy arm fired.
     void AppendDtVoteRow(GameObject observedRobot, int fvIndex, string vote)
     {
-        if (!dtVotesCsvHeaderWritten)
-        {
-            dtVotesCsvBuffer.AppendLine("seed,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label");
-            dtVotesCsvHeaderWritten = true;
-        }
-
         dtVotesCsvBuffer.AppendLine(string.Join(",",
             GetSeed().ToString(),
+            GetArenaSize(),
             transform.root.name,
             observedRobot.name,
             Time.time.ToString("F2"),
@@ -771,58 +790,66 @@ public class DangerCascadeController : MonoBehaviour
             GetGroundTruthLabel(observedRobot)));
     }
 
-    void FlushCsv()
+    // Swarm-consolidated export — one danger/vanilla_votes/dt_votes CSV covering every observer
+    // in the scene, mirroring GlobalCSVExporter's own single-file-for-the-whole-swarm convention,
+    // instead of one file per robot. Callable from any single instance's exportCSV toggle (all
+    // equivalent — each just triggers the same static sweep) or directly, e.g. from
+    // automation.cs, without needing a reference to any particular robot.
+    public static void FlushAllConsolidated()
     {
-        if (csvBuffer.Length == 0)
+        DangerCascadeController[] controllers = FindObjectsOfType<DangerCascadeController>();
+        if (controllers.Length == 0)
         {
-            Debug.LogWarning($"{transform.root.name}: DangerCascadeController has no CSV rows to export.");
+            Debug.LogWarning("DangerCascadeController: no instances found in the scene — nothing to export.");
             return;
         }
 
+        StringBuilder danger = new StringBuilder();
+        StringBuilder vanilla = new StringBuilder();
+        StringBuilder dt = new StringBuilder();
+
+        foreach (var c in controllers)
+        {
+            // Drop this observer's entire run — not just rows after injection — if it's currently
+            // a faulty robot. A faulty robot's own sensors/actuators are compromised, so its
+            // subjective observations of every other robot are untrustworthy for the whole run,
+            // not only from the injection timestamp onward. Same reasoning GlobalCSVExporter
+            // already applies to its own export (see its "SKIP if observer is faulty" check).
+            bool observerIsFaulty = c.faultInjector != null
+                && c.faultInjector.faulty_robots.Contains(c.transform.root.name);
+
+            if (!observerIsFaulty)
+            {
+                danger.Append(c.csvBuffer);
+                vanilla.Append(c.vanillaVotesCsvBuffer);
+                dt.Append(c.dtVotesCsvBuffer);
+            }
+
+            c.csvBuffer.Clear();
+            c.vanillaVotesCsvBuffer.Clear();
+            c.dtVotesCsvBuffer.Clear();
+        }
+
         string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-        string filename = $"{transform.root.name} - danger - {timestamp}.csv";
         string dir = Path.Combine(Application.dataPath, "Scripts", "data", "latest_data", "Danger");
         Directory.CreateDirectory(dir);
-        string filepath = Path.Combine(dir, filename);
+        int seed = controllers[0].GetSeed();
 
-        File.WriteAllText(filepath, csvBuffer.ToString());
-        Debug.LogError($"{transform.root.name}: DangerCascadeController exported CSV to:\n{filepath}");
-
-        csvBuffer.Clear();
-        csvHeaderWritten = false;
+        WriteConsolidatedFile(dir, $"seed {seed} - danger - {timestamp}.csv", DangerCsvHeader, danger);
+        WriteConsolidatedFile(dir, $"seed {seed} - vanilla_votes - {timestamp}.csv", VoteCsvHeader, vanilla);
+        WriteConsolidatedFile(dir, $"seed {seed} - dt_votes - {timestamp}.csv", VoteCsvHeader, dt);
     }
 
-    void FlushVanillaVotesCsv()
+    private static void WriteConsolidatedFile(string dir, string filename, string header, StringBuilder rows)
     {
-        if (vanillaVotesCsvBuffer.Length == 0) return; // not an error — DT-only runs won't populate this
+        if (rows.Length == 0)
+        {
+            Debug.LogWarning($"DangerCascadeController: no rows to export for {filename} — skipping.");
+            return;
+        }
 
-        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-        string filename = $"{transform.root.name} - vanilla_votes - {timestamp}.csv";
-        string dir = Path.Combine(Application.dataPath, "Scripts", "data", "latest_data", "Danger");
-        Directory.CreateDirectory(dir);
         string filepath = Path.Combine(dir, filename);
-
-        File.WriteAllText(filepath, vanillaVotesCsvBuffer.ToString());
-        Debug.LogError($"{transform.root.name}: DangerCascadeController exported vanilla vote CSV to:\n{filepath}");
-
-        vanillaVotesCsvBuffer.Clear();
-        vanillaVotesCsvHeaderWritten = false;
-    }
-
-    void FlushDtVotesCsv()
-    {
-        if (dtVotesCsvBuffer.Length == 0) return; // not an error — only populated when dangerExtensionEnabled is true
-
-        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-        string filename = $"{transform.root.name} - dt_votes - {timestamp}.csv";
-        string dir = Path.Combine(Application.dataPath, "Scripts", "data", "latest_data", "Danger");
-        Directory.CreateDirectory(dir);
-        string filepath = Path.Combine(dir, filename);
-
-        File.WriteAllText(filepath, dtVotesCsvBuffer.ToString());
-        Debug.LogError($"{transform.root.name}: DangerCascadeController exported DT vote CSV to:\n{filepath}");
-
-        dtVotesCsvBuffer.Clear();
-        dtVotesCsvHeaderWritten = false;
+        File.WriteAllText(filepath, header + "\n" + rows.ToString());
+        Debug.LogError($"DangerCascadeController: exported swarm-consolidated CSV to:\n{filepath}");
     }
 }
