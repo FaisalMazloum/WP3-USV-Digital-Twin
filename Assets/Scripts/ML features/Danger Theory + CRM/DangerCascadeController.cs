@@ -708,7 +708,7 @@ public class DangerCascadeController : MonoBehaviour
     {
         if (faultInjector != null && faultInjector.injectFault
             && faultInjector.selectedFault != FaultInjector.FaultType.None
-            && faultInjector.faulty_robots.Contains(observedRobot.name))
+            && faultInjector.IsFaultyRobot(observedRobot.name))
         {
             return faultInjector.selectedFault.ToString();
         }
@@ -816,7 +816,7 @@ public class DangerCascadeController : MonoBehaviour
             // not only from the injection timestamp onward. Same reasoning GlobalCSVExporter
             // already applies to its own export (see its "SKIP if observer is faulty" check).
             bool observerIsFaulty = c.faultInjector != null
-                && c.faultInjector.faulty_robots.Contains(c.transform.root.name);
+                && c.faultInjector.IsFaultyRobot(c.transform.root.name);
 
             if (!observerIsFaulty)
             {

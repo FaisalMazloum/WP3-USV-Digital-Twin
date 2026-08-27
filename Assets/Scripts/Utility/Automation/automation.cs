@@ -8,6 +8,7 @@ public class AutomatedDataCollection : MonoBehaviour
     [SerializeField] private SpawnerUI spawnerUI;
     [SerializeField] private FaultInjector faultInjector;
     [SerializeField] private GlobalCSVExporter globalCSVExporter;
+    [SerializeField] private PatternSelector patternSelector;
     
     [Header("Collection Settings")]
     [SerializeField] private int numberOfRuns = 1;
@@ -47,21 +48,19 @@ public class AutomatedDataCollection : MonoBehaviour
 // // ================ MISC TEST ================
 //         initialWait = 10f;
 //         postSpawnWait = 5f;
-//         postSpawnWait = 5f;
 //         ROS2Wait = 5f;
         // stabalizePeriod = -1f;
         // postStartCollectionWait = -1f;
-        // postFaultWait = -1f;
+        postFaultWait = -1f;
         // sceneReloadWait = -1f;
 
 // ================ T-RO TEST ================
-        initialWait = 10f;
+        initialWait = 15f;
         postSpawnWait = 5f;
-        postSpawnWait = 5f;
-        ROS2Wait = 5f;
+        ROS2Wait = 20f;
         stabalizePeriod = 30f;
         postStartCollectionWait = 150f;     // to collect samples before fault injection
-        postFaultWait = 150f;               // to collect samples after fault injection
+        // postFaultWait = 150f;               // to collect samples after fault injection
         sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
 
 // ================ Quick Testing ================
@@ -110,19 +109,25 @@ public class AutomatedDataCollection : MonoBehaviour
         }
         yield return new WaitForSeconds(postSpawnWait);
 
-        Time.timeScale = 0; // Pause game to allow all swarm agents to recieve START command.
+        // Time.timeScale = 0; // Pause game to allow all swarm agents to recieve START command.
+        SetCmdVelSubscribersEnabled(false); // Hold every remora_bot still instead of/alongside pausing.
+        yield return new WaitForSecondsRealtime(ROS2Wait); // yield return new WaitForSeconds(ROS2Wait);
 
-        // yield return new WaitForSeconds(ROS2Wait);
-        yield return new WaitForSecondsRealtime(ROS2Wait);
-
-        Time.timeScale = 1; // UnPause game to begin mission.
-
-        yield return new WaitForSeconds(stabalizePeriod);
+        // Time.timeScale = 1; // UnPause game to begin mission.
+        SetCmdVelSubscribersEnabled(true); // Release the whole swarm simultaneously.
 
         // ===========================================
-        // Step 3: Trigger start collection
+        // Step 3: Trigger stabalization
         // ===========================================
-        if(stabalizePeriod != -1f)
+        if(postStartCollectionWait != -1f)
+        {
+            yield return new WaitForSeconds(stabalizePeriod);
+        }
+
+        // ===========================================
+        // Step 4: Trigger start collection
+        // ===========================================
+        if(postStartCollectionWait != -1f)
         {
             Debug.Log("[DataCollection] Finished stabalizing. Starting collection...");
             // faultInjector.SetFaultyRobotRandom(); // Randomly select faulty robot(s)
@@ -133,17 +138,20 @@ public class AutomatedDataCollection : MonoBehaviour
         }
         
         // ===========================================
-        // Step 4: Inject fault
+        // Step 5: Inject fault
         // ===========================================
-        if(postStartCollectionWait != -1f)
+        if(postFaultWait != -1f)
         {
+            SetPatternAssignmentZero(PatternSelector.PatternType.aggregation_pattern);
             Debug.Log("[DataCollection] Injected fault...");
             TriggerBooleanField(faultInjector, "injectFault");
             yield return new WaitForSeconds(postFaultWait);
-            
+        }
 
+        if(sceneReloadWait != -1f)
+        {
         // ===========================================
-        // Step 5: Export DangerCascadeController CSVs (danger log + vanilla/DT vote logs)
+        // Step 6: Export DangerCascadeController CSVs (danger log + vanilla/DT vote logs)
         // ===========================================
             Debug.Log("[DataCollection] Exporting DangerCascadeController CSVs...");
             TriggerDangerCascadeExport();
@@ -216,6 +224,30 @@ public class AutomatedDataCollection : MonoBehaviour
     {
         DangerCascadeController.FlushAllConsolidated();
         Debug.Log("[DataCollection] Triggered swarm-consolidated DangerCascadeController CSV export.");
+    }
+
+    // Disables/enables every remora_bot's CmdVel_Subscriber in one pass — all in the same frame,
+    // so the whole swarm starts/stops simultaneously (CmdVel_Subscriber.OnDisable zeroes velocity,
+    // so disabling actually holds the robot still, not just stops it responding to new commands).
+    private void SetCmdVelSubscribersEnabled(bool enabled)
+    {
+        GameObject[] robots = GameObject.FindGameObjectsWithTag("remora_bot");
+        foreach (var robot in robots)
+        {
+            var cmdVel = robot.GetComponentInChildren<CmdVel_Subscriber>();
+            if (cmdVel != null) cmdVel.enabled = enabled;
+        }
+    }
+
+    // Switches PatternSelector's first pattern group (patternAssignments[0]) to the given pattern.
+    private void SetPatternAssignmentZero(PatternSelector.PatternType pattern)
+    {
+        if (patternSelector == null || patternSelector.patternAssignments.Count == 0)
+        {
+            Debug.LogError("[DataCollection] Could not set pattern — patternSelector is null or has no assignments!");
+            return;
+        }
+        patternSelector.patternAssignments[0].pattern = pattern;
     }
 
     private void TriggerBooleanField(MonoBehaviour target, string fieldName)

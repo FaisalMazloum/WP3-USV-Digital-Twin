@@ -821,7 +821,7 @@ MonoBehaviour:
   robotDiameter: 0.45
   safetyMargin: 0.1
   maxRetries: 100
-  randomSeed: 8
+  randomSeed: 2
 --- !u!1 &29082011
 GameObject:
   m_ObjectHideFlags: 0
@@ -10616,6 +10616,7 @@ MonoBehaviour:
   spawnerUI: {fileID: 1398189929}
   faultInjector: {fileID: 1970658656}
   globalCSVExporter: {fileID: 989455816}
+  patternSelector: {fileID: 1664194980}
   numberOfRuns: 1
   autoStart: 1
 --- !u!4 &521902328
@@ -19583,7 +19584,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &983131848
 Transform:
   m_ObjectHideFlags: 0
@@ -28585,7 +28586,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1409338546
 Transform:
   m_ObjectHideFlags: 0
@@ -33806,18 +33807,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d7db29d1f774901aa160957b56d97b5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  selected_pattern: 1
-  robots:
-  - 0
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  - 6
-  - 7
-  - 8
-  - 9
+  patternAssignments:
+  - pattern: 0
+    robots:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+  - pattern: 4
+    robots:
+    - 0
 --- !u!1001 &1669335858
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -40305,9 +40309,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _manualController: {fileID: 1994622783}
-  selectedFault: 10
+  patternSelector: {fileID: 1664194980}
+  softwareHangDriveRobotId: 0
+  softwareHangDrivePattern: 4
+  selectedFault: 11
   faulty_robots:
-  - remora0
+  - 0
   injectFault: 0
   faultInjectionTime: -1
   showRobots: 0

@@ -65,6 +65,11 @@ public class CmdVel_Subscriber : MonoBehaviour
     private float actuatorOverrideSpeed = 0f;
     private float actuatorOverrideOmegaDeg = 0f;
 
+    // Snapshot of the command actually applied to the rigidbody on the most recent FixedUpdate —
+    // see GetIntentVelocities() for why this is read instead of desiredSpeed/desiredOmega directly.
+    private float lastAppliedIntentSpeed = 0f;
+    private float lastAppliedIntentOmegaDeg = 0f;
+
     // public string robotID = "V3 - REMORA bot";
     public string robotID = "remora0";
     public string rosTopic;
@@ -122,6 +127,15 @@ public class CmdVel_Subscriber : MonoBehaviour
         float target_omega = actuatorOverrideActive ? actuatorOverrideOmegaDeg : desiredOmega;
         float target_omega_rad = target_omega * Mathf.Deg2Rad;
 
+        // Snapshot of the exact command this tick's rb.velocity/angularVelocity gets set from —
+        // GetIntentVelocities() reads THIS, not the live desiredSpeed/desiredOmega fields, since
+        // those can be overwritten by a new ROS message at any moment, independent of the fixed
+        // physics timestep. Without this, "intent" could reflect a command that hasn't been
+        // applied to the rigidbody yet, one physics step ahead of "actual" — a real, fault-free
+        // staleness gap, not PID lag.
+        lastAppliedIntentSpeed = target_velocity;
+        lastAppliedIntentOmegaDeg = target_omega;
+
         float v_right_target = target_velocity + (target_omega_rad * thruster_separation) / 2f;
         float v_left_target = target_velocity - (target_omega_rad * thruster_separation) / 2f;
 
@@ -145,41 +159,28 @@ public class CmdVel_Subscriber : MonoBehaviour
         // =======================================================================
         //                         KINEMATIC THRUSTER DRIVE
         // =======================================================================
-        bool touchingWater = (rightWaterObject != null && rightWaterObject.IsTouchingWater())
-                           || (leftWaterObject != null && leftWaterObject.IsTouchingWater());
-        if (touchingWater)
-        {
-            float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
-            float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
+        float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
+        float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
 
-            Vector3 currentVel = rb.velocity;
-            float currentForward = Vector3.Dot(currentVel, rb.transform.forward);
-            Vector3 residualVel = currentVel - rb.transform.forward * currentForward;
-            rb.velocity = residualVel + rb.transform.forward * bodyForwardTarget;
-
-            Vector3 currentAngVel = rb.angularVelocity;
-            float currentYaw = Vector3.Dot(currentAngVel, transform.up);
-            Vector3 residualAngVel = currentAngVel - transform.up * currentYaw;
-            rb.angularVelocity = residualAngVel + transform.up * bodyOmegaRadTarget;
-        }
+        rb.velocity = rb.transform.forward * bodyForwardTarget;
+        rb.angularVelocity = transform.up * bodyOmegaRadTarget;
 
 
         // =======================================================================
         //                      FORCE BASED THRUSTER DRIVE
         // =======================================================================
-        // ---- OLD: force-based PID drive (kept for rollback) ----
         // Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
         // Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
-        //
+        
         // float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
         // float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
-        //
+        
         // float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
         // float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
-        //
+        
         // rightForce *= Rmotor_state;
         // leftForce *= Lmotor_state;
-        //
+        
         // if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
         // {
         //     rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
@@ -190,13 +191,30 @@ public class CmdVel_Subscriber : MonoBehaviour
         // }
     }
 
+    // Drive is fully kinematic now (FixedUpdate overwrites rb.velocity/angularVelocity outright,
+    // no drag) — so just disabling this component would freeze the robot at whatever velocity it
+    // last had, and it would keep gliding forever instead of actually stopping. Zero it out on
+    // disable so "disabled" really means "stopped" (used by AutomatedDataCollection to hold the
+    // whole swarm still during ROS2 startup instead of pausing Time.timeScale).
+    void OnDisable()
+    {
+        if (rb == null) return;
+        rb.velocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+    }
+
 
     public void InitializeRigidBody()
     {
         // rb = GameObject.Find("V3 - REMORA bot").GetComponent<Rigidbody>();
         rb = GameObject.Find(robotID).GetComponent<Rigidbody>();
-        rightThruster = rb.transform.Find("motor right").transform;
-        leftThruster = rb.transform.Find("motor left").transform;
+        // Swapped: the "motor right"/"motor left" GameObjects are physically mirrored relative to
+        // their names — under force/PID drive (which applies real torque at these exact
+        // positions), that mislabeling made the PID correctly converge each real motor to the
+        // WRONG target, producing an exact left/right swap in GetActualThrusterSpeeds() versus
+        // intent. Kinematic drive never references these Transforms, so it's unaffected either way.
+        rightThruster = rb.transform.Find("motor left").transform;
+        leftThruster = rb.transform.Find("motor right").transform;
         rightWaterObject = rightThruster.GetComponentInChildren<WaterObject>();
         leftWaterObject = leftThruster.GetComponentInChildren<WaterObject>();
     }
@@ -309,12 +327,14 @@ public class CmdVel_Subscriber : MonoBehaviour
     {
         Dictionary<string, float> velocities = new Dictionary<string, float>();
 
-        // Mirror FixedUpdate()'s own target selection: while the actuator probe override is
-        // active, that override IS the real commanded intent (a stationary rotation), not the
-        // stale pre-probe cmd_vel fields — otherwise intent stays frozen on the old straight-
-        // driving command for the whole probe window while actual motion is a real turn.
-        float intentSpeed = actuatorOverrideActive ? actuatorOverrideSpeed : desiredSpeed;
-        float intentOmegaDeg = actuatorOverrideActive ? actuatorOverrideOmegaDeg : desiredOmega;
+        // Reads the snapshot FixedUpdate() took of what it actually applied this tick — NOT the
+        // live desiredSpeed/desiredOmega/actuatorOverride fields directly. Those can change
+        // between physics steps (a new ROS message, or BeginActuatorOverride firing) at any
+        // moment, so reading them live here could report a command that hasn't reached
+        // rb.velocity/rb.angularVelocity yet — a one-step-ahead staleness gap versus
+        // GetActualThrusterSpeeds(), with no fault involved.
+        float intentSpeed = lastAppliedIntentSpeed;
+        float intentOmegaDeg = lastAppliedIntentOmegaDeg;
 
         float leftTarget = (intentSpeed - (intentOmegaDeg * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;
         float rightTarget = (intentSpeed + (intentOmegaDeg * Mathf.Deg2Rad * thruster_separation / 2f)) * 100f;

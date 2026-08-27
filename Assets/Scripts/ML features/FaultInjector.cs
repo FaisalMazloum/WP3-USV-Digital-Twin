@@ -10,6 +10,11 @@ public class FaultInjector : MonoBehaviour
     [SerializeField]
     private ManualController _manualController;
 
+    [Header("SoftwareHang drive override")]
+    [SerializeField] private PatternSelector patternSelector;
+    public string softwareHangDriveRobotId = "0"; // bare suffix, same convention as PatternSelector — no "remora" prefix needed
+    public PatternSelector.PatternType softwareHangDrivePattern = PatternSelector.PatternType.drive_pattern;
+
     public enum FaultType
     {
         Pmin,   // Fixed.  Proximity sensor outputs min value = 0 (always detects obstacle nearby).
@@ -28,7 +33,7 @@ public class FaultInjector : MonoBehaviour
     }
 
     public FaultType selectedFault;
-    public List<string> faulty_robots = new List<string> { "remora0" };
+    public List<string> faulty_robots = new List<string> { "0" }; // bare suffix — no "remora" prefix needed
     public bool injectFault = false;
     private bool is_degrading = false;
     public float faultInjectionTime = -1f;
@@ -48,16 +53,28 @@ public class FaultInjector : MonoBehaviour
     }
 
     void Update()
-    {   
+    {
         initializeComponents();
+
+        // Independent of faulty_robots — softwareHangDriveRobotId is a separate, directly-configured
+        // target (e.g. a healthy investigator robot you want actively running a pattern while
+        // SoftwareHang is live), not necessarily one of the faulty robots itself.
+        if (patternSelector != null)
+        {
+            if (injectFault && selectedFault == FaultType.SoftwareHang)
+                patternSelector.SetPatternOverride(softwareHangDriveRobotId, softwareHangDrivePattern);
+            else
+                patternSelector.ClearPatternOverride(softwareHangDriveRobotId);
+        }
 
         if (injectFault)
         {
             if (faultInjectionTime < 0f) // Only set once
                 faultInjectionTime = Time.time;
 
-            foreach (string robotName in faulty_robots)
+            foreach (string robotId in faulty_robots)
             {
+                string robotName = "remora" + robotId;
                 var _FaultyActuators = GameObject.Find(robotName).GetComponentInChildren<CmdVel_Subscriber>();
                 var _FaultyRabSensor = GameObject.Find(robotName).GetComponentInChildren<RABSensor>();
                 var _FaultyRemoraLidar = GameObject.Find(robotName).GetComponentInChildren<RemoraLIDAR>();
@@ -227,13 +244,22 @@ public class FaultInjector : MonoBehaviour
     }
     
 
+    // faulty_robots stores bare suffixes ("0"), but every other script checks against full robot
+    // names ("remora0") — this is the one place that convention gets bridged, so it doesn't leak
+    // into GlobalCSV/remora_gizmos/DangerCascadeController.
+    public bool IsFaultyRobot(string fullRobotName)
+    {
+        string id = fullRobotName.StartsWith("remora") ? fullRobotName.Substring("remora".Length) : fullRobotName;
+        return faulty_robots.Contains(id);
+    }
+
     void initializeComponents()
     {
         GameObject[] healthy_robotIDs = GameObject.FindGameObjectsWithTag("remora_bot");
 
         foreach (var robot in healthy_robotIDs)
         {
-            if (faulty_robots.Contains(robot.name)) continue;
+            if (IsFaultyRobot(robot.name)) continue;
 
             var healthyBot = GameObject.Find(robot.name)?.GetComponentInChildren<CmdVel_Subscriber>();
             if (healthyBot == null) continue;
@@ -291,7 +317,8 @@ public class FaultInjector : MonoBehaviour
 
         foreach (var robot in randomRobots)
         {
-            faulty_robots.Add(robot.name);
+            string id = robot.name.StartsWith("remora") ? robot.name.Substring("remora".Length) : robot.name;
+            faulty_robots.Add(id);
             // Debug.Log($"Randomly selected faulty robot: {robot.name}");
         }
     }
@@ -302,6 +329,6 @@ public class FaultInjector : MonoBehaviour
     public void SetFaultyRobot(int robotNumber)
     {
         faulty_robots.Clear();
-        faulty_robots.Add($"remora{robotNumber}");
+        faulty_robots.Add(robotNumber.ToString());
     }
 }

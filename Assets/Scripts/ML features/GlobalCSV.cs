@@ -161,7 +161,7 @@ public class GlobalCSVExporter : MonoBehaviour
             var featureHistory = extractor.feature_list_history;
 
             // if(observerName == _faultInjector.faulty_robot && _faultInjector.selectedFault != FaultInjector.FaultType.None)
-            if(_faultInjector.faulty_robots.Contains(observerName))
+            if(_faultInjector.IsFaultyRobot(observerName))
                 continue;   // SKIP if observer is faulty
 
             foreach (var kvp in featureHistory)
@@ -200,7 +200,7 @@ public class GlobalCSVExporter : MonoBehaviour
                     // ======================================================================
                     if(_faultInjector.selectedFault != FaultInjector.FaultType.None 
                         // && observedRobot.name == _faultInjector.faulty_robot 
-                        && _faultInjector.faulty_robots.Contains(observedRobot.name)
+                        && _faultInjector.IsFaultyRobot(observedRobot.name)
                         && _faultInjector.injectFault
                         && _faultInjector.faultInjectionTime >= 0f
                         && sample.timestamp >= _faultInjector.faultInjectionTime
@@ -239,7 +239,7 @@ public class GlobalCSVExporter : MonoBehaviour
 // ========================= FAULTY ROBOT TARGET (for easy dataset filtering) =========================
                     if(_faultInjector.selectedFault != FaultInjector.FaultType.None 
                         // && observedRobot.name == _faultInjector.faulty_robot
-                        && _faultInjector.faulty_robots.Contains(observedRobot.name)
+                        && _faultInjector.IsFaultyRobot(observedRobot.name)
                         && _faultInjector.injectFault
                         && _faultInjector.faultInjectionTime >= 0f
                         // No sample_timestamp check since we want all samples from faulty robot (even -1 RUL) to have 1

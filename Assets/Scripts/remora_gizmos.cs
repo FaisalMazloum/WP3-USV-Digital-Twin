@@ -210,7 +210,7 @@ public class remora_gizmos : MonoBehaviour
             style.alignment = TextAnchor.LowerLeft;
             style.fontStyle = FontStyle.Bold;
             
-            if (!neighbor_state_manager_._faultInjector.faulty_robots.Contains(neighbor_state_manager_.robotID))
+            if (!neighbor_state_manager_._faultInjector.IsFaultyRobot(neighbor_state_manager_.robotID))
             {
                 style.normal.textColor = Color.green;
                 UnityEditor.Handles.Label(transform.position + Vector3.forward * 0.25f, $"{neighbor_state_manager_.robotID.ToUpper()}", style);
@@ -277,11 +277,11 @@ public class remora_gizmos : MonoBehaviour
         if (Application.isPlaying)
         {
             bool isFaultyDropout   = thrusters_.in_dropout 
-                                && neighbor_state_manager_._faultInjector.faulty_robots.Contains(neighbor_state_manager_.robotID) 
+                                && neighbor_state_manager_._faultInjector.IsFaultyRobot(neighbor_state_manager_.robotID) 
                                 && neighbor_state_manager_._faultInjector.injectFault;
 
             bool isFocusedSampling = thrusters_.in_dropout 
-                                && !neighbor_state_manager_._faultInjector.faulty_robots.Contains(neighbor_state_manager_.robotID);
+                                && !neighbor_state_manager_._faultInjector.IsFaultyRobot(neighbor_state_manager_.robotID);
 
             if (isFaultyDropout)
             {

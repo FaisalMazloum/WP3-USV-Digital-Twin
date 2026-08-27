@@ -86,7 +86,7 @@ tmux send-keys -t $SESSION "sleep 0; echo '--- Starting Controller ---'; ros2 la
 tmux select-pane -t 0
 tmux split-window -v -t $SESSION
 tmux send-keys -t $SESSION "$FULL_SETUP" C-m
-tmux send-keys -t $SESSION "sleep 15; echo '--- Publishing ---'; ros2 topic pub /swarm_command communication_interfaces/msg/Int8Message '{data: 1}'" C-m
+tmux send-keys -t $SESSION "sleep 20; echo '--- Publishing ---'; ros2 topic pub /swarm_command communication_interfaces/msg/Int8Message '{data: 1}'" C-m
 
 # --- PANE 3: MONITOR (Bottom Right) ---
 tmux select-pane -t 1
