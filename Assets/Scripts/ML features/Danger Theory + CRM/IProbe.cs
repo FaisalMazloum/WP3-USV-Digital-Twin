@@ -2,8 +2,11 @@
 /// Danger-gated CRM extension — shared probe abstraction (danger_crm_implementation_brief.md,
 /// Section 6). Common contract for every probe mechanism (BlinkEmitter/BlinkReader,
 /// ActuatorEmitter/ActuatorReader, or any future one) — DangerCascadeController dispatches and
-/// reads all of them through this interface rather than one hardcoded concrete type — PROBING
-/// dispatches/reads whichever one DangerCascadeController.probeType currently selects.
+/// reads all of them through this interface rather than one hardcoded concrete type. PROBING
+/// dispatches/reads whichever probe(s) DangerCascadeController.probeMode currently selects (see
+/// CombineProbeResults) — any ENABLED probe failing fails the whole test, every enabled probe
+/// must pass for an overall pass; a disabled probe is excluded from judgment entirely, not
+/// treated as an automatic pass.
 /// </summary>
 public enum ProbeResult { Pending, Pass, Fail }
 

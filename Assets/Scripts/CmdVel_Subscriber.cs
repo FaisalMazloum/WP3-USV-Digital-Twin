@@ -70,6 +70,21 @@ public class CmdVel_Subscriber : MonoBehaviour
     private float lastAppliedIntentSpeed = 0f;
     private float lastAppliedIntentOmegaDeg = 0f;
 
+    // ==================== INTENT SETTLE / COMMAND-STAGNATION GATE ====================
+    // Method 2: command age. Doesn't compare intent vs. actual at all — just watches how long the
+    // commanded target has been stable. Any per-wheel target change bigger than jerkThreshold
+    // resets a "time since last jerk" clock and pauses discrepancy evaluation; evaluation resumes
+    // once the command has held steady for longer than commandSettleDuration (the PID's settling
+    // time). Simple and cheap, at a known tradeoff: under CONTINUOUS jerk (reversals more
+    // frequent than commandSettleDuration), the clock never gets a chance to expire, so a
+    // genuinely dead actuator hiding behind nonstop reversals won't surface via this gate alone —
+    // accepted for now per explicit instruction; revisit if that scenario needs covering too.
+    private float prevLeftTarget = 0f;
+    private float prevRightTarget = 0f;
+    private float timeSinceLastJerk = 0f;
+    public float jerkThreshold = 0.1f; // m/s per-tick target change that counts as a jerk — tune to taste
+    public float commandSettleDuration = 0.5f; // seconds of command stability required before resuming evaluation
+
     // public string robotID = "V3 - REMORA bot";
     public string robotID = "remora0";
     public string rosTopic;
@@ -139,6 +154,12 @@ public class CmdVel_Subscriber : MonoBehaviour
         float v_right_target = target_velocity + (target_omega_rad * thruster_separation) / 2f;
         float v_left_target = target_velocity - (target_omega_rad * thruster_separation) / 2f;
 
+        // Computed off the pre-degradation/pre-motor-state target — a degraded/faulted wheel's
+        // target is deliberately excluded here, same reasoning as GetIntentVelocities(), so a
+        // real fault's own settling behavior can't get mistaken for command jerk and suppress
+        // its own detection.
+        UpdateSettleTimer(v_left_target, v_right_target);
+
         // ========== APPLY DEGRADATION TO TARGET VELOCITIES ==========
         v_right_target *= degradationCoeff;
         v_left_target *= degradationCoeff;
@@ -159,36 +180,37 @@ public class CmdVel_Subscriber : MonoBehaviour
         // =======================================================================
         //                         KINEMATIC THRUSTER DRIVE
         // =======================================================================
-        float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
-        float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
+        // float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
+        // float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
 
-        rb.velocity = rb.transform.forward * bodyForwardTarget;
-        rb.angularVelocity = transform.up * bodyOmegaRadTarget;
+        // rb.velocity = rb.transform.forward * bodyForwardTarget;
+        // rb.angularVelocity = transform.up * bodyOmegaRadTarget;
 
 
         // =======================================================================
         //                      FORCE BASED THRUSTER DRIVE
         // =======================================================================
-        // Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
-        // Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
+        Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
+        Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
         
-        // float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
-        // float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
+        float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
+        float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
         
-        // float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
-        // float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
+        float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
+        float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
         
-        // rightForce *= Rmotor_state;
-        // leftForce *= Lmotor_state;
+        rightForce *= Rmotor_state;
+        leftForce *= Lmotor_state;
         
-        // if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
-        // {
-        //     rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
-        // }
-        // if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
-        // {
-        //     rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
-        // }
+        if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+        {
+            rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
+        }
+        if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
+        {
+            rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
+        }
+
     }
 
     // Drive is fully kinematic now (FixedUpdate overwrites rb.velocity/angularVelocity outright,
@@ -267,6 +289,32 @@ public class CmdVel_Subscriber : MonoBehaviour
     public void EndActuatorOverride()
     {
         actuatorOverrideActive = false;
+    }
+
+    // Command-age tracking: any per-wheel target change bigger than jerkThreshold resets
+    // timeSinceLastJerk to 0, restarting the settle clock. leftTarget/rightTarget are the
+    // pre-degradation/pre-motor-state targets, same reasoning as GetIntentVelocities(): a real
+    // fault's own zeroed target must not itself be read as a jerk event.
+    private void UpdateSettleTimer(float leftTarget, float rightTarget)
+    {
+        float maxDelta = Mathf.Max(Mathf.Abs(leftTarget - prevLeftTarget), Mathf.Abs(rightTarget - prevRightTarget));
+        prevLeftTarget = leftTarget;
+        prevRightTarget = rightTarget;
+
+        if (maxDelta > jerkThreshold)
+            timeSinceLastJerk = 0f;
+        else
+            timeSinceLastJerk += Time.fixedDeltaTime;
+    }
+
+    /// <summary>
+    /// True while the commanded target hasn't held stable for commandSettleDuration yet —
+    /// BACT_discrepancy consumers should suppress fault checks while this is true, since
+    /// intent/actual divergence right after a command change is expected PID lag, not a fault.
+    /// </summary>
+    public bool IsIntentSettling()
+    {
+        return timeSinceLastJerk < commandSettleDuration;
     }
 
     /// <summary> Real achieved body angular velocity about the up axis (deg/s) — ground truth, for verifying an actuator probe. </summary>

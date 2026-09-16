@@ -53,7 +53,7 @@ public class RemoraLIDAR : MonoBehaviour
         // angleIncrement = 2.0f;
         // rangeMin = 0.15f;
         // rangeMax = 10f; // different range from RAB range
-        // scanFrequency = 5f;
+        // scanFrequency = 1f;
 
 
         // --------------------- //

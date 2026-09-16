@@ -28,7 +28,8 @@ public class FaultInjector : MonoBehaviour
         IntermittentMotor,
         RAB_discrepancy,   // RAB reports 0 detected neighbours to self; true count (via GetTrueNeighborCount) unaffected.
         BACT_discrepancy,  // Both actuators off, like Bact — but cmd_vel intent keeps updating normally, so intent vs actually-observed motion diverges.
-        SoftwareHang,      // Robot otherwise behaves normally, but its probe (blink or actuator, whichever DangerCascadeController.probeType selects) never responds.
+        SoftwareHang,      // Robot otherwise behaves normally, but none of its enabled probes (DangerCascadeController.probeMode) respond.
+        CompleteFailure,   // Both actuators genuinely off (like Bact) AND RAB self-report zeroed (like RAB_discrepancy) AND both probes forced to fail regardless of DangerCascadeController.probeMode — nothing this robot does can pass the discrepancy channel or any probe test.
         None
     }
 
@@ -212,6 +213,29 @@ public class FaultInjector : MonoBehaviour
                         _manualController.SetMotorStates(1, 1);
                         _FaultyActuators.SetMotorStates(1, 1);
                         _FaultyActuators.SetMotorStates(1, 1);
+                        break;
+
+                    case FaultType.CompleteFailure:
+                        // Everything fails at once — real physical actuator-off (same as Bact,
+                        // which also feeds the actuator-discrepancy signature exactly like
+                        // BACT_discrepancy), PLUS the RAB self-report discrepancy (same as
+                        // RAB_discrepancy: self-reported neighbour count forced to 0, true count
+                        // untouched), PLUS an explicit blink hang. Motor-off alone only guarantees
+                        // the ACTUATOR probe fails — BlinkEmitter has no physical/motor connection
+                        // at all (it's a fully simulated optical channel), so without the hang it
+                        // would keep blinking correctly and pass every time. This fault is meant to
+                        // trip the discrepancy channel via BOTH signatures and fail regardless of
+                        // DangerCascadeController.probeMode (Blink-only, Actuator-only, or Both),
+                        // so every failure mechanism is forced explicitly rather than relying on
+                        // just one.
+                        _FaultyRabSensor.SetRABState();
+                        _FaultyRabSensor.SetNeighborDiscrepancyFault(1);
+                        _FaultyRemoraLidar.SetSensorState();
+                        _manualController.SetMotorStates(1, 1);
+                        _manualController.SetMotorStates(1, 1);
+                        _FaultyActuators.SetMotorStates(1, 1);
+                        _FaultyActuators.SetMotorStates(1, 1);
+                        if (_FaultyBlinkEmitter != null) _FaultyBlinkEmitter.SetSimulatedHang(true);
                         break;
 
                     case FaultType.SoftwareHang:

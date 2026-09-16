@@ -47,7 +47,7 @@ public class ActuatorEmitter : MonoBehaviour, IProbeEmitter
     [Header("Actuator probe parameters (deg/s)")]
     public float omegaMinDegPerSec = 20f;
     public float omegaMaxDegPerSec = 80f;
-    [Range(0f, 1f)] public float toleranceFraction = 0.15f;
+    [Range(0f, 1f)] public float toleranceFraction = 0.20f;
     public float rotationDuration = 4f;     // each of the 3 attempts is held for exactly this long
     public float interRotationPause = 0.5f; // stationary gap between the 3 attempts
 

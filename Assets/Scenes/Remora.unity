@@ -821,7 +821,7 @@ MonoBehaviour:
   robotDiameter: 0.45
   safetyMargin: 0.1
   maxRetries: 100
-  randomSeed: 2
+  randomSeed: 6
 --- !u!1 &29082011
 GameObject:
   m_ObjectHideFlags: 0
@@ -8436,7 +8436,7 @@ MonoBehaviour:
   centerOfMass: {x: 0, y: 0, z: 0}
   combinedCenterOfMass: {x: 0, y: 0, z: 0}
   useDefaultInertia: 1
-  inertiaTensor: {x: 0, y: 0.06254732, z: 0}
+  inertiaTensor: {x: 0.5460867, y: 0.06254732, z: 0.54552394}
   combinedInertiaTensor: {x: 8.973207e+11, y: 7.726411e+11, z: 1.2467963e+11}
 --- !u!114 &413413386
 MonoBehaviour:
@@ -8475,7 +8475,7 @@ Rigidbody:
   m_UseGravity: 1
   m_IsKinematic: 0
   m_Interpolate: 0
-  m_Constraints: 80
+  m_Constraints: 0
   m_CollisionDetection: 0
 --- !u!4 &413413388
 Transform:
@@ -8524,6 +8524,8 @@ MonoBehaviour:
   maxForce: 0.5
   print_RUL: 0
   in_dropout: 0
+  jerkThreshold: 0.1
+  commandSettleDuration: 0.5
   robotID: remora0
   rosTopic: 
 --- !u!114 &413413390
@@ -26273,7 +26275,7 @@ Transform:
   m_GameObject: {fileID: 1307122791}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.1, z: 0}
+  m_LocalPosition: {x: 0, y: 0.016, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -27214,7 +27216,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 27b6429d2e65bc5a3907939f169d35c7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  windSpeed: 0
+  windSpeed: 5
   windAngle: 0
   exposedArea: 1
   windForce: {x: 0, y: 0, z: 0}
@@ -32204,13 +32206,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dangerExtensionEnabled: 1
-  probeType: 0
+  probeMode: 1
   c: 0
   pi_E: 0.001
   pi_R: 0.0007
   investigationCap: 1
   E_t: 2
+  discrepancyChannelEnabled: 1
+  probingChannelEnabled: 1
   thetaDisc: 0.3
+  useSettleGate: 1
   maxPossibleNeighbors: 9
   clearedTagDuration: 30
   featureExtractor: {fileID: 1609780197}
@@ -33808,7 +33813,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   patternAssignments:
-  - pattern: 0
+  - pattern: 1
     robots:
     - 1
     - 2
@@ -33819,7 +33824,7 @@ MonoBehaviour:
     - 7
     - 8
     - 9
-  - pattern: 4
+  - pattern: 1
     robots:
     - 0
 --- !u!1001 &1669335858
@@ -39359,7 +39364,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _version: 0
   _radius: 0.1
-  _weight: 0.5
+  _weight: 3
   _weightUpDownMul: 0.5
   _innerSphereMultiplier: 1.55
   _innerSphereOffset: 0.109
@@ -40311,8 +40316,8 @@ MonoBehaviour:
   _manualController: {fileID: 1994622783}
   patternSelector: {fileID: 1664194980}
   softwareHangDriveRobotId: 0
-  softwareHangDrivePattern: 4
-  selectedFault: 11
+  softwareHangDrivePattern: 0
+  selectedFault: 12
   faulty_robots:
   - 0
   injectFault: 0
@@ -43468,7 +43473,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &2112394878
 Transform:
   m_ObjectHideFlags: 0
@@ -43936,7 +43941,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &2134136997
 Transform:
   m_ObjectHideFlags: 0
@@ -43966,7 +43971,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _version: 0
   _radius: 0.3
-  _weight: 0.5
+  _weight: 5
   _weightUpDownMul: 0.5
   _innerSphereMultiplier: 1.55
   _innerSphereOffset: 0.109

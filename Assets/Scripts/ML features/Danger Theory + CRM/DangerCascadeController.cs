@@ -25,13 +25,18 @@ using UnityEngine;
 public class DangerCascadeController : MonoBehaviour
 {
     public enum RobotFaultState { NORMAL, PRIMED, DISCREPANCY_PASSED, PROBING, FAULT, CLEARED }
-    public enum ProbeType { Blink, Actuator }
+    public enum ProbeMode { Both, BlinkOnly, ActuatorOnly }
 
     [Header("Master switch (Section 1) — false must reproduce vanilla CRM exactly")]
     public bool dangerExtensionEnabled = false;
 
-    [Header("Probe type (Section 6) — only the selected probe runs during PROBING")]
-    public ProbeType probeType = ProbeType.Blink;
+    // Which probe(s) actually run during DISCREPANCY_PASSED/PROBING — freely switchable in the
+    // inspector. Whichever one(s) are enabled here, the combining logic in CombineProbeResults is
+    // identical either way: FAULT if any ENABLED probe reports Fail, CLEARED only if every enabled
+    // probe reports Pass — agnostic to whether it's judging one channel or both. A probe that isn't
+    // enabled here is simply never dispatched/read, not "silently passed".
+    [Header("Probe selection (Section 6) — result logic is identical regardless of which run")]
+    public ProbeMode probeMode = ProbeMode.Both;
 
     [Header("CRM parameter passthrough (Section 8) — defaults match vanilla CRM's consts exactly")]
     // public double c = 0.20;
@@ -54,15 +59,32 @@ public class DangerCascadeController : MonoBehaviour
     public double investigationCap = 20.0;
     public double E_t = 60.0;
 
+    [Header("Ablation switches — only meaningful when dangerExtensionEnabled is true")]
+    // Zeroes the discrepancy signal everywhere it's read: the always-on Section 7 arm (verdict
+    // OR-term + its window) AND PRIMED's own transition window (line ~422), so a PRIMED robot can
+    // never take the sensor-fault shortcut straight to FAULT — it always falls through to
+    // DISCREPANCY_PASSED/PROBING instead. ComputeDiscrepancy() itself is skipped entirely (not
+    // just its result discarded) so RABSensor/CmdVel_Subscriber reads/logs from that computation
+    // don't run either.
+    public bool discrepancyChannelEnabled = true;
+    // Freezes the ladder at NORMAL forever — NORMAL never transitions to PRIMED, so no probes are
+    // ever dispatched and FAULT/CLEARED are never reached via the ladder. With this off, `verdict`
+    // is driven purely by the always-on discrepancy arm above (or is always false if that's also
+    // disabled).
+    public bool probingChannelEnabled = true;
+
     [Header("Discrepancy signal (Section 4d)")]
     [Range(0f, 1f)] public float thetaDisc = 0.3f;
+    // TEMP A/B toggle: uncheck to bypass CmdVel_Subscriber.IsIntentSettling() entirely and
+    // confirm the jerk-settle gate is what's suppressing BACT_discrepancy false negatives.
+    public bool useSettleGate = true;
     public int maxPossibleNeighbors = 9; // normalization denominator — NUM_ROBOTS - 1
 
     // BACT_discrepancy: relative per-wheel tolerance — |intent - actual| / |intent| > this on
     // either wheel counts as a discrepancy this cycle. Below actuatorIntentFloorCm, intent isn't
     // large enough to divide by meaningfully (e.g. commanded to sit still), so that wheel is
     // skipped for the cycle rather than letting noise/residual momentum blow up to a huge ratio.
-    private float actuatorTolerance = 0.8f;
+    private float actuatorTolerance = 0.10f;
     const float actuatorIntentFloorCm = 1f;
 
     // Note: Nmin/Nmax/T (Section 6) are NOT duplicated here — each robot's own BlinkEmitter
@@ -124,6 +146,16 @@ public class DangerCascadeController : MonoBehaviour
 
     private Dictionary<GameObject, LadderEntry> ladders = new Dictionary<GameObject, LadderEntry>();
 
+    // Fixed-configuration ablation variants (Section 12) — always maintained alongside the live
+    // `ladders` above, regardless of what discrepancyChannelEnabled/probingChannelEnabled currently
+    // say in the inspector, so the combined votes CSV always has all three DT configurations from
+    // a single run instead of requiring three separate manual passes. Each keeps its own
+    // independent ladder state (never touches swarmConsensus, so they can't cross-contaminate each
+    // other or the live ladder's broadcasts) — see UpdateLadder.
+    private Dictionary<GameObject, LadderEntry> laddersDtFull = new Dictionary<GameObject, LadderEntry>();
+    private Dictionary<GameObject, LadderEntry> laddersDtNoDisc = new Dictionary<GameObject, LadderEntry>();
+    private Dictionary<GameObject, LadderEntry> laddersDtNoProbe = new Dictionary<GameObject, LadderEntry>();
+
     // Discrepancy signal (Section 4d) now reads directly off each target's own RABSensor
     // (GetSelfReportedNeighborCount/GetTrueNeighborCount) — the RAB_discrepancy fault
     // (FaultInjector) drives this for real instead of a simulated proxy toggle.
@@ -162,6 +194,12 @@ public class DangerCascadeController : MonoBehaviour
     // csvBuffer above.
     private StringBuilder vanillaVotesCsvBuffer = new StringBuilder();
     private StringBuilder dtVotesCsvBuffer = new StringBuilder();
+
+    // Combined votes CSV (Section 12) — one row per BFV/cycle with all four classifiers' votes
+    // (vanilla, DT-full, DT-no-discrepancy, DT-no-probing) as columns, so an ablation comparison
+    // doesn't require three separate manual runs + manual consolidation. Additive alongside
+    // vanillaVotesCsvBuffer/dtVotesCsvBuffer above, not a replacement for them.
+    private StringBuilder combinedVotesCsvBuffer = new StringBuilder();
 
     void Start()
     {
@@ -340,201 +378,59 @@ public class DangerCascadeController : MonoBehaviour
                 continue;
             }
 
-            // ---- Discrepancy (Sections 4d, 7) — always on, independent of ladder state.
-            //      Windowed/majority-voted (same 9-cycle rule as everything else) so a single
-            //      noisy cycle can't flip the verdict — this is the fix for a flickering
-            //      discrepancy signal producing a flickering verdict. ----
+            // ---- Discrepancy (Sections 4d, 7) — raw value computed once regardless of the
+            //      inspector's discrepancyChannelEnabled checkbox, since the fixed ablation
+            //      variants below need it independently of whatever the live config currently
+            //      says. UpdateLadder decides per-call whether to actually use it (discEnabled). ----
             float discrepancy = ComputeDiscrepancy(observedRobot);
-            EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc);
-            bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow);
 
-            // ---- Adopt a swarm-wide conclusion another observer already reached, so this
-            //      observer doesn't redundantly re-run its own full investigation once the swarm
-            //      has already spoken. FAULT is terminal — never downgraded back to CLEARED by an
-            //      older broadcast once independently confirmed. No-op if swarmConsensus is unset. ----
-            if (swarmConsensus != null && ladder.state != RobotFaultState.FAULT
-                && swarmConsensus.TryGetCanonicalVerdict(observedRobot, out RobotFaultState broadcastState, out float broadcastTime))
+            if (!laddersDtFull.TryGetValue(observedRobot, out LadderEntry ladderDtFull))
             {
-                if (broadcastState == RobotFaultState.FAULT)
-                {
-                    if (logStateTransitions)
-                        Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> FAULT " +
-                            $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
-                    ladder.state = RobotFaultState.FAULT;
-                }
-                else if (broadcastState == RobotFaultState.CLEARED && ladder.state != RobotFaultState.CLEARED
-                    && (Time.time - broadcastTime) <= clearedTagDuration)
-                {
-                    // The staleness check above is the actual fix for a real bug: the coordinator
-                    // never removes an old broadcast, so without checking whether it's already
-                    // expired, this would re-adopt CLEARED (with the SAME old timestamp) every
-                    // single cycle forever, even long after it should have lapsed. Since adoption
-                    // runs before the switch statement below, that re-adoption pre-empted the
-                    // NORMAL case's own E>R check every cycle too — permanently freezing the
-                    // ladder out of ever re-entering PRIMED, regardless of what fault came later.
-                    if (logStateTransitions)
-                        Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> CLEARED " +
-                            $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
-                    ladder.state = RobotFaultState.CLEARED;
-                    ladder.clearedTime = broadcastTime; // sync expiry timing across the swarm
-                }
+                ladderDtFull = new LadderEntry();
+                laddersDtFull[observedRobot] = ladderDtFull;
+            }
+            if (!laddersDtNoDisc.TryGetValue(observedRobot, out LadderEntry ladderDtNoDisc))
+            {
+                ladderDtNoDisc = new LadderEntry();
+                laddersDtNoDisc[observedRobot] = ladderDtNoDisc;
+            }
+            if (!laddersDtNoProbe.TryGetValue(observedRobot, out LadderEntry ladderDtNoProbe))
+            {
+                ladderDtNoProbe = new LadderEntry();
+                laddersDtNoProbe[observedRobot] = ladderDtNoProbe;
             }
 
-            // ---- Emax for the CURRENT state, applied read-only to this cycle's verdict.
-            //      Never written back into TE/TR — the shared clone ODE keeps integrating
-            //      untouched, which is what lets two observers cap the same FV differently. ----
-            double Emax = GetEmaxForState(ladder.state, rawR);
-            double clampedE = Math.Min(rawE, Emax);
-            bool ladderFault = clampedE > E_t;
-
-            // Section 5 is explicit that FAULT must "populate heatmap as faulty" unconditionally
-            // — it's a terminal classification, not a live re-evaluated one. Everywhere else,
-            // Emax < E_t by construction (R < investigationCap < E_t), so ladderFault is
-            // structurally only ever true once FAULT has already removed the cap; the OR here is
-            // just a safety net in case that ordering is ever violated (Start() warns if so).
-            bool verdict = (ladder.state == RobotFaultState.FAULT) || discrepancyMajority || ladderFault;
+            // ---- Live/main ladder — respects the inspector's current ablation checkboxes and
+            //      swarmConsensus; drives finalVerdict/currentState (heatmap). ----
+            string dtVoteMain = UpdateLadder(observedRobot, ladder, rawE, rawR, discrepancy,
+                discrepancyChannelEnabled, probingChannelEnabled, true,
+                out RobotFaultState stateBeforeSwitch, out RobotFaultState stateAfterSwitch,
+                out bool verdict, out ProbeResult probeResult, out double Emax);
 
             finalVerdict[observedRobot] = verdict;
-            currentState[observedRobot] = ladder.state;
+            currentState[observedRobot] = stateBeforeSwitch;
 
-            ProbeResult probeResult = ProbeResult.Pending;
-            RobotFaultState stateBefore = ladder.state;
-
-            // ---- State machine transitions (decide state for NEXT cycle) — Section 5 ----
-            switch (ladder.state)
-            {
-                case RobotFaultState.NORMAL:
-                    // Any single observer's own sustained outlier read triggers entry — no
-                    // cross-robot majority required (reverted per your call: single-robot trigger,
-                    // swarm-wide sync only on the eventual FAULT/CLEARED conclusion, not the gate).
-                    EnqueueWindow(ladder.outlierWindow, rawE > rawR);
-                    if (WindowMajority(ladder.outlierWindow))
-                    {
-                        ladder.state = RobotFaultState.PRIMED;
-                        ladder.discrepancyWindow.Clear();
-                    }
-                    break;
-
-                case RobotFaultState.PRIMED:
-                    EnqueueWindow(ladder.discrepancyWindow, discrepancy > thetaDisc);
-                    if (ladder.discrepancyWindow.Count >= FeatureExtractor.CRM_HISTORY_LENGTH)
-                    {
-                        ladder.state = WindowMajority(ladder.discrepancyWindow)
-                            ? RobotFaultState.FAULT               // sensor fault
-                            : RobotFaultState.DISCREPANCY_PASSED;
-                    }
-                    break;
-
-                case RobotFaultState.DISCREPANCY_PASSED:
-                {
-                    // Only the selected probeType is dispatched — the other emitter is never
-                    // touched, so it can't be running "in the background" alongside it.
-                    if (probeType == ProbeType.Actuator)
-                    {
-                        ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
-                        if (actuatorEmitter != null) actuatorEmitter.RequestProbe();
-                    }
-                    else
-                    {
-                        BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
-                        if (blinkEmitter != null) blinkEmitter.RequestProbe();
-                    }
-                    ladder.state = RobotFaultState.PROBING;
-                    break;
-                }
-
-                case RobotFaultState.PROBING:
-                {
-                    // Deliberately NOT calling ResetProbe() — same multi-observer-safe reasoning
-                    // as before: the result stays put until the next RequestProbe() naturally
-                    // supersedes it, so every observer with a ladder in PROBING for this target
-                    // can read independently at its own pace instead of racing to consume first.
-                    ProbeResult result;
-                    if (probeType == ProbeType.Actuator)
-                    {
-                        ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
-                        result = (actuatorEmitter != null && actuatorReader != null)
-                            ? actuatorReader.ReadResult(actuatorEmitter) : ProbeResult.Pending;
-                    }
-                    else
-                    {
-                        BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
-                        result = (blinkEmitter != null && blinkReader != null)
-                            ? blinkReader.ReadResult(blinkEmitter) : ProbeResult.Pending;
-                    }
-
-                    if (result != ProbeResult.Pending)
-                    {
-                        probeResult = result;
-                        ladder.state = result == ProbeResult.Pass ? RobotFaultState.CLEARED : RobotFaultState.FAULT;
-                        if (result == ProbeResult.Pass)
-                            ladder.clearedTime = Time.time;
-                    }
-                    // else: at least one probe still running, stay in PROBING.
-                    break;
-                }
-
-                case RobotFaultState.FAULT:
-                    // Terminal for this episode (Section 5) — flag/log only, no recovery.
-                    break;
-
-                case RobotFaultState.CLEARED:
-                    // Resume feeding outlierWindow while CLEARED (still frozen during
-                    // PRIMED/DISCREPANCY_PASSED/PROBING — unread there anyway). If the underlying
-                    // BFV pattern never actually stopped being an outlier, this window already
-                    // shows that the instant the tag expires, so NORMAL re-triggers PRIMED on the
-                    // very next cycle instead of silently sitting at NORMAL for up to 9 more cycles
-                    // while an empty window rebuilds from scratch.
-                    EnqueueWindow(ladder.outlierWindow, rawE > rawR);
-
-                    // Purely time-based expiry — a CLEARED tag holds for the full
-                    // clearedTagDuration regardless of behavior change, for both
-                    // independently-earned and adopted CLEARED alike.
-                    if ((Time.time - ladder.clearedTime) > clearedTagDuration)
-                    {
-                        ladder.state = RobotFaultState.NORMAL;
-                        ladder.discrepancyWindow.Clear();
-                    }
-                    break;
-            }
-
-            if (ladder.state != stateBefore)
-            {
-                if (logStateTransitions)
-                    Debug.Log($"{transform.root.name}: {observedRobot.name} ladder {stateBefore} -> {ladder.state} " +
-                        $"(E={rawE:F2}, R={rawR:F2}, discrepancy={discrepancy:F2})");
-
-                // Announce a freshly-reached conclusion so every other observer can adopt it next
-                // cycle instead of redundantly re-running its own investigation. No-op if
-                // swarmConsensus is unset.
-                if (swarmConsensus != null
-                    && (ladder.state == RobotFaultState.FAULT || ladder.state == RobotFaultState.CLEARED))
-                {
-                    swarmConsensus.BroadcastVerdict(observedRobot, ladder.state, Time.time);
-                }
-            }
+            // ---- Fixed-configuration ablation variants (Section 12) — always computed regardless
+            //      of the live checkboxes above, each with its own independent ladder state and no
+            //      swarmConsensus (so the three variants can't cross-contaminate each other or the
+            //      live ladder's broadcasts). Logged as extra columns in the combined votes CSV so
+            //      vanilla + all three DT configurations come out of a single run instead of three
+            //      separate manual passes. ----
+            string dtVoteFull = UpdateLadder(observedRobot, ladderDtFull, rawE, rawR, discrepancy,
+                true, true, false,
+                out _, out _, out _, out _, out _);
+            string dtVoteNoDisc = UpdateLadder(observedRobot, ladderDtNoDisc, rawE, rawR, discrepancy,
+                false, true, false,
+                out _, out _, out _, out _, out _);
+            string dtVoteNoProbe = UpdateLadder(observedRobot, ladderDtNoProbe, rawE, rawR, discrepancy,
+                true, false, false,
+                out _, out _, out _, out _, out _);
 
             if (loggingActive)
             {
-                AppendCsvRow(observedRobot, fvIndex, discrepancy, ladder.state, Emax, rawE, rawR, probeResult, verdict);
-
-                // CRM-DT's vote — post-switch ladder.state (matching AppendCsvRow's own "state"
-                // column above, which is also post-switch, even though the live-display
-                // currentState/finalVerdict dictionaries elsewhere use the pre-switch value).
-                // discrepancyMajority overrides toward "1" even mid-investigation (that's its whole
-                // purpose — Section 7); absence of it never asserts "0" on its own, only a fully
-                // completed NORMAL does.
-                string dtVote;
-                if (discrepancyMajority)
-                    dtVote = "1";
-                else if (ladder.state == RobotFaultState.FAULT)
-                    dtVote = "1";
-                else if (ladder.state == RobotFaultState.NORMAL)
-                    dtVote = "0";
-                else
-                    dtVote = "NA";
-
-                AppendDtVoteRow(observedRobot, fvIndex, dtVote);
+                AppendCsvRow(observedRobot, fvIndex, discrepancy, stateAfterSwitch, Emax, rawE, rawR, probeResult, verdict);
+                AppendDtVoteRow(observedRobot, fvIndex, dtVoteMain);
+                AppendCombinedVoteRow(observedRobot, fvIndex, majorityAttack, dtVoteFull, dtVoteNoDisc, dtVoteNoProbe);
             }
         }
 
@@ -545,11 +441,230 @@ public class DangerCascadeController : MonoBehaviour
                 departed.Add(robot);
         foreach (var robot in departed)
         {
+            laddersDtFull.Remove(robot);
+            laddersDtNoDisc.Remove(robot);
+            laddersDtNoProbe.Remove(robot);
             ladders.Remove(robot);
             finalVerdict.Remove(robot);
             currentState.Remove(robot);
             crmHistory.Remove(robot);
         }
+    }
+
+    // Shared per-robot ladder update — the always-on discrepancy arm (Section 7), Emax/verdict
+    // computation, and (if probeEnabled) the Section 5 state-machine transitions including probe
+    // dispatch/read. Reused both for the live/main ladder (discEnabled/probeEnabled taken from the
+    // inspector's current checkboxes, useSwarmConsensus true) and for the three fixed-configuration
+    // ablation variants logged to the combined votes CSV (useSwarmConsensus false, fixed flags,
+    // completely independent of whatever the inspector currently says).
+    //
+    // rawDiscrepancy is the unablated ComputeDiscrepancy() result — this method is what actually
+    // zeroes it out when discEnabled is false, exactly like the single-ladder version used to.
+    string UpdateLadder(GameObject observedRobot, LadderEntry ladder, double rawE, double rawR,
+        float rawDiscrepancy, bool discEnabled, bool probeEnabled, bool useSwarmConsensus,
+        out RobotFaultState stateBeforeSwitch, out RobotFaultState stateAfterSwitch,
+        out bool verdict, out ProbeResult probeResult, out double Emax)
+    {
+        float discrepancy = discEnabled ? rawDiscrepancy : 0f;
+        EnqueueWindow(ladder.alwaysOnDiscrepancyWindow, discrepancy > thetaDisc);
+        bool discrepancyMajority = WindowMajority(ladder.alwaysOnDiscrepancyWindow);
+
+        // ---- Adopt a swarm-wide conclusion another observer already reached, so this observer
+        //      doesn't redundantly re-run its own full investigation once the swarm has already
+        //      spoken. FAULT is terminal — never downgraded back to CLEARED by an older broadcast
+        //      once independently confirmed. No-op if swarmConsensus is unset or this call opted
+        //      out (the fixed ablation variants always opt out). ----
+        if (useSwarmConsensus && swarmConsensus != null && ladder.state != RobotFaultState.FAULT
+            && swarmConsensus.TryGetCanonicalVerdict(observedRobot, out RobotFaultState broadcastState, out float broadcastTime))
+        {
+            if (broadcastState == RobotFaultState.FAULT)
+            {
+                if (logStateTransitions)
+                    Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> FAULT " +
+                        $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
+                ladder.state = RobotFaultState.FAULT;
+            }
+            else if (broadcastState == RobotFaultState.CLEARED && ladder.state != RobotFaultState.CLEARED
+                && (Time.time - broadcastTime) <= clearedTagDuration)
+            {
+                // The staleness check above is the actual fix for a real bug: the coordinator
+                // never removes an old broadcast, so without checking whether it's already
+                // expired, this would re-adopt CLEARED (with the SAME old timestamp) every single
+                // cycle forever, even long after it should have lapsed. Since adoption runs before
+                // the switch statement below, that re-adoption pre-empted the NORMAL case's own
+                // E>R check every cycle too — permanently freezing the ladder out of ever
+                // re-entering PRIMED, regardless of what fault came later.
+                if (logStateTransitions)
+                    Debug.Log($"{transform.root.name}: ADOPTED {observedRobot.name} -> CLEARED " +
+                        $"(was {ladder.state}, broadcast at t={broadcastTime:F1}, coordinator instance {swarmConsensus.GetInstanceID()}).");
+                ladder.state = RobotFaultState.CLEARED;
+                ladder.clearedTime = broadcastTime; // sync expiry timing across the swarm
+            }
+        }
+
+        // ---- Emax for the CURRENT state, applied read-only to this cycle's verdict. Never
+        //      written back into TE/TR — the shared clone ODE keeps integrating untouched, which
+        //      is what lets two observers (or ablation variants) cap the same FV differently. ----
+        Emax = GetEmaxForState(ladder.state, rawR);
+        double clampedE = Math.Min(rawE, Emax);
+        bool ladderFault = clampedE > E_t;
+
+        // Section 5 is explicit that FAULT must "populate heatmap as faulty" unconditionally —
+        // it's a terminal classification, not a live re-evaluated one. Everywhere else, Emax < E_t
+        // by construction (R < investigationCap < E_t), so ladderFault is structurally only ever
+        // true once FAULT has already removed the cap; the OR here is just a safety net in case
+        // that ordering is ever violated (Start() warns if so).
+        verdict = (ladder.state == RobotFaultState.FAULT) || discrepancyMajority || ladderFault;
+
+        probeResult = ProbeResult.Pending;
+        stateBeforeSwitch = ladder.state;
+
+        // ---- State machine transitions (decide state for NEXT cycle) — Section 5. With
+        //      probeEnabled false, the ladder is frozen at whatever state it's already in — NORMAL
+        //      never transitions to PRIMED, so no probe is ever dispatched. Adoption above still
+        //      runs regardless (a robot can still be told FAULT/CLEARED by another observer's
+        //      independent ladder, when useSwarmConsensus is true). ----
+        if (probeEnabled)
+        switch (ladder.state)
+        {
+            case RobotFaultState.NORMAL:
+                // Any single observer's own sustained outlier read triggers entry — no
+                // cross-robot majority required (single-robot trigger, swarm-wide sync only on the
+                // eventual FAULT/CLEARED conclusion, not the gate).
+                EnqueueWindow(ladder.outlierWindow, rawE > rawR);
+                if (WindowMajority(ladder.outlierWindow))
+                {
+                    ladder.state = RobotFaultState.PRIMED;
+                    ladder.discrepancyWindow.Clear();
+                }
+                break;
+
+            case RobotFaultState.PRIMED:
+                EnqueueWindow(ladder.discrepancyWindow, discrepancy > thetaDisc);
+                if (ladder.discrepancyWindow.Count >= FeatureExtractor.CRM_HISTORY_LENGTH)
+                {
+                    ladder.state = WindowMajority(ladder.discrepancyWindow)
+                        ? RobotFaultState.FAULT               // sensor fault
+                        : RobotFaultState.DISCREPANCY_PASSED;
+                }
+                break;
+
+            case RobotFaultState.DISCREPANCY_PASSED:
+            {
+                // Only the probe(s) selected by probeMode are dispatched — see CombineProbeResults
+                // for how a disabled probe is excluded from judgment rather than treated as an
+                // automatic pass. Shared across the live ladder and all three ablation variants —
+                // there's only one real robot/emitter pair to probe, so whichever ladder gets here
+                // first drives the actual physical probe(s) and the others read the same shared
+                // results.
+                if (probeMode != ProbeMode.BlinkOnly)
+                {
+                    ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
+                    if (actuatorEmitter != null) actuatorEmitter.RequestProbe();
+                }
+                if (probeMode != ProbeMode.ActuatorOnly)
+                {
+                    BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
+                    if (blinkEmitter != null) blinkEmitter.RequestProbe();
+                }
+
+                ladder.state = RobotFaultState.PROBING;
+                break;
+            }
+
+            case RobotFaultState.PROBING:
+            {
+                // Deliberately NOT calling ResetProbe() — same multi-observer-safe reasoning as
+                // before: each result stays put until its own next RequestProbe() naturally
+                // supersedes it, so every observer/variant with a ladder in PROBING for this
+                // target can read independently at its own pace instead of racing to consume first.
+                bool useActuator = probeMode != ProbeMode.BlinkOnly;
+                bool useBlink = probeMode != ProbeMode.ActuatorOnly;
+
+                ProbeResult actuatorResult = ProbeResult.Pending;
+                if (useActuator)
+                {
+                    ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);
+                    actuatorResult = (actuatorEmitter != null && actuatorReader != null)
+                        ? actuatorReader.ReadResult(actuatorEmitter) : ProbeResult.Pending;
+                }
+
+                ProbeResult blinkResult = ProbeResult.Pending;
+                if (useBlink)
+                {
+                    BlinkEmitter blinkEmitter = GetBlinkEmitter(observedRobot);
+                    blinkResult = (blinkEmitter != null && blinkReader != null)
+                        ? blinkReader.ReadResult(blinkEmitter) : ProbeResult.Pending;
+                }
+
+                ProbeResult result = CombineProbeResults(useActuator, actuatorResult, useBlink, blinkResult);
+
+                if (result != ProbeResult.Pending)
+                {
+                    probeResult = result;
+                    ladder.state = result == ProbeResult.Pass ? RobotFaultState.CLEARED : RobotFaultState.FAULT;
+                    if (result == ProbeResult.Pass)
+                        ladder.clearedTime = Time.time;
+                }
+                // else: at least one enabled probe still Pending and none has Failed yet, stay in
+                // PROBING.
+                break;
+            }
+
+            case RobotFaultState.FAULT:
+                // Terminal for this episode (Section 5) — flag/log only, no recovery.
+                break;
+
+            case RobotFaultState.CLEARED:
+                // Resume feeding outlierWindow while CLEARED (still frozen during
+                // PRIMED/DISCREPANCY_PASSED/PROBING — unread there anyway). If the underlying BFV
+                // pattern never actually stopped being an outlier, this window already shows that
+                // the instant the tag expires, so NORMAL re-triggers PRIMED on the very next cycle
+                // instead of silently sitting at NORMAL for up to 9 more cycles while an empty
+                // window rebuilds from scratch.
+                EnqueueWindow(ladder.outlierWindow, rawE > rawR);
+
+                // Purely time-based expiry — a CLEARED tag holds for the full clearedTagDuration
+                // regardless of behavior change, for both independently-earned and adopted CLEARED
+                // alike.
+                if ((Time.time - ladder.clearedTime) > clearedTagDuration)
+                {
+                    ladder.state = RobotFaultState.NORMAL;
+                    ladder.discrepancyWindow.Clear();
+                }
+                break;
+        }
+
+        stateAfterSwitch = ladder.state;
+
+        if (stateAfterSwitch != stateBeforeSwitch)
+        {
+            if (logStateTransitions)
+                Debug.Log($"{transform.root.name}: {observedRobot.name} ladder {stateBeforeSwitch} -> {stateAfterSwitch} " +
+                    $"(E={rawE:F2}, R={rawR:F2}, discrepancy={discrepancy:F2})");
+
+            // Announce a freshly-reached conclusion so every other observer can adopt it next
+            // cycle instead of redundantly re-running its own investigation. No-op if
+            // swarmConsensus is unset or this call opted out.
+            if (useSwarmConsensus && swarmConsensus != null
+                && (stateAfterSwitch == RobotFaultState.FAULT || stateAfterSwitch == RobotFaultState.CLEARED))
+            {
+                swarmConsensus.BroadcastVerdict(observedRobot, stateAfterSwitch, Time.time);
+            }
+        }
+
+        // CRM-DT's vote — post-switch state (matching AppendCsvRow's own "state" column, which is
+        // also post-switch, even though the live-display currentState/finalVerdict dictionaries
+        // elsewhere use the pre-switch value). discrepancyMajority overrides toward "1" even
+        // mid-investigation (that's its whole purpose — Section 7); absence of it never asserts
+        // "0" on its own, only a fully completed NORMAL does.
+        if (discrepancyMajority)
+            return "1";
+        if (stateAfterSwitch == RobotFaultState.FAULT)
+            return "1";
+        if (stateAfterSwitch == RobotFaultState.NORMAL)
+            return "0";
+        return "NA";
     }
 
     // Section 5 cap ladder — order enforced by the caller's inspector values: R < investigationCap < E_t
@@ -606,6 +721,11 @@ public class DangerCascadeController : MonoBehaviour
             observedCmdVelSubscribers[observedRobot] = cmdVel;
         }
         if (cmdVel == null) return 0f;
+
+        // Suppress while the commanded target is still settling from a recent jump (e.g. a hard
+        // turn reversal) — that gap is expected PID/inertia lag, not a fault. See
+        // CmdVel_Subscriber.IsIntentSettling(). TEMP: toggle off to A/B test against pre-jerk-filter behavior.
+        if (useSettleGate && cmdVel.IsIntentSettling()) return 0f;
 
         Dictionary<string, float> intent = cmdVel.GetIntentVelocities();
         Dictionary<string, float> actual = cmdVel.GetActualThrusterSpeeds();
@@ -666,6 +786,25 @@ public class DangerCascadeController : MonoBehaviour
         return trueCount > FeatureExtractor.CRM_HISTORY_LENGTH / 2;
     }
 
+    // Agnostic to which probe(s) actually ran: judges only the ENABLED ones (per probeMode), never
+    // treats a probe that wasn't dispatched as an automatic pass or as a block on ever concluding.
+    // Fail-fast OR / AND-pass among the enabled subset — any enabled probe reporting Fail fails
+    // the whole test immediately (no need to wait for the other one), every enabled probe must
+    // report Pass for an overall Pass, otherwise still Pending.
+    static ProbeResult CombineProbeResults(bool actuatorEnabled, ProbeResult actuatorResult,
+        bool blinkEnabled, ProbeResult blinkResult)
+    {
+        bool anyFail = (actuatorEnabled && actuatorResult == ProbeResult.Fail)
+            || (blinkEnabled && blinkResult == ProbeResult.Fail);
+        if (anyFail) return ProbeResult.Fail;
+
+        bool actuatorOk = !actuatorEnabled || actuatorResult == ProbeResult.Pass;
+        bool blinkOk = !blinkEnabled || blinkResult == ProbeResult.Pass;
+        if (actuatorOk && blinkOk) return ProbeResult.Pass;
+
+        return ProbeResult.Pending;
+    }
+
     // ================================= CSV (Section 10) =================================
 
     // Written once per consolidated file (see FlushAllConsolidated) rather than once per
@@ -674,6 +813,11 @@ public class DangerCascadeController : MonoBehaviour
     private const string DangerCsvHeader = "seed,arena_size,observer_id,robot_id,timestamp,BFV,A_j,affinity_to_nearest_tolerated,"
         + "self_reported_neighbors,true_neighbors,discrepancy,state,Emax,E,R,probe_result,final_verdict,ground_truth_label";
     private const string VoteCsvHeader = "seed,arena_size,observer_id,robot_id,timestamp,BFV,vote,ground_truth_label";
+    // Section 12: all four classifiers' votes in one row, so an ablation comparison doesn't need
+    // three separate manual runs + manual consolidation. dt_vote_* are "1"/"0"/"NA" (see
+    // UpdateLadder); vanilla_vote is always "1"/"0" (no state machine to withhold judgment).
+    private const string CombinedVotesCsvHeader = "seed,arena_size,observer_id,robot_id,timestamp,BFV,"
+        + "vanilla_vote,dt_vote_full,dt_vote_no_discrepancy,dt_vote_no_probing,ground_truth_label";
 
     // Lazily found and cached (RobotSpawner lives on a separate scene object, not this robot's
     // prefab, so it can't be wired at prefab-authoring time) — same int all three CSVs' "seed"
@@ -790,7 +934,27 @@ public class DangerCascadeController : MonoBehaviour
             GetGroundTruthLabel(observedRobot)));
     }
 
-    // Swarm-consolidated export — one danger/vanilla_votes/dt_votes CSV covering every observer
+    // Section 12: all four classifiers' votes (vanilla, DT-full, DT-no-discrepancy,
+    // DT-no-probing) in one row — additive alongside AppendVanillaVoteRow/AppendDtVoteRow, not a
+    // replacement.
+    void AppendCombinedVoteRow(GameObject observedRobot, int fvIndex, bool vanillaVote,
+        string dtVoteFull, string dtVoteNoDisc, string dtVoteNoProbe)
+    {
+        combinedVotesCsvBuffer.AppendLine(string.Join(",",
+            GetSeed().ToString(),
+            GetArenaSize(),
+            transform.root.name,
+            observedRobot.name,
+            Time.time.ToString("F2"),
+            fvIndex.ToString(),
+            vanillaVote ? "1" : "0",
+            dtVoteFull,
+            dtVoteNoDisc,
+            dtVoteNoProbe,
+            GetGroundTruthLabel(observedRobot)));
+    }
+
+    // Swarm-consolidated export — one danger/vanilla_votes/dt_votes/combined_votes CSV covering every observer
     // in the scene, mirroring GlobalCSVExporter's own single-file-for-the-whole-swarm convention,
     // instead of one file per robot. Callable from any single instance's exportCSV toggle (all
     // equivalent — each just triggers the same static sweep) or directly, e.g. from
@@ -807,6 +971,7 @@ public class DangerCascadeController : MonoBehaviour
         StringBuilder danger = new StringBuilder();
         StringBuilder vanilla = new StringBuilder();
         StringBuilder dt = new StringBuilder();
+        StringBuilder combined = new StringBuilder();
 
         foreach (var c in controllers)
         {
@@ -823,11 +988,13 @@ public class DangerCascadeController : MonoBehaviour
                 danger.Append(c.csvBuffer);
                 vanilla.Append(c.vanillaVotesCsvBuffer);
                 dt.Append(c.dtVotesCsvBuffer);
+                combined.Append(c.combinedVotesCsvBuffer);
             }
 
             c.csvBuffer.Clear();
             c.vanillaVotesCsvBuffer.Clear();
             c.dtVotesCsvBuffer.Clear();
+            c.combinedVotesCsvBuffer.Clear();
         }
 
         string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
@@ -838,6 +1005,7 @@ public class DangerCascadeController : MonoBehaviour
         WriteConsolidatedFile(dir, $"seed {seed} - danger - {timestamp}.csv", DangerCsvHeader, danger);
         WriteConsolidatedFile(dir, $"seed {seed} - vanilla_votes - {timestamp}.csv", VoteCsvHeader, vanilla);
         WriteConsolidatedFile(dir, $"seed {seed} - dt_votes - {timestamp}.csv", VoteCsvHeader, dt);
+        WriteConsolidatedFile(dir, $"seed {seed} - combined_votes - {timestamp}.csv", CombinedVotesCsvHeader, combined);
     }
 
     private static void WriteConsolidatedFile(string dir, string filename, string header, StringBuilder rows)
