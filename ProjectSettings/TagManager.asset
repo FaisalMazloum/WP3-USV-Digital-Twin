@@ -6,6 +6,7 @@ TagManager:
   tags:
   - remora_bot
   - base_link
+  - ignore_collider
   layers:
   - Default
   - TransparentFX
@@ -13,7 +14,7 @@ TagManager:
   - 
   - Water
   - UI
-  - 
+  - Heatmap
   - 
   - 
   - 

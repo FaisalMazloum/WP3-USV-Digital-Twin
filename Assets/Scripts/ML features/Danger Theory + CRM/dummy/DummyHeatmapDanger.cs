@@ -11,6 +11,7 @@ using UnityEngine.UI;
 /// state text per cell. Sized to the swarm's actual (inspector-configured) robot count instead of
 /// a fixed NUM_ROBOTS. Original HeatmapDanger.cs is untouched.
 /// </summary>
+[ExecuteAlways]
 public class DummyHeatmapDanger : MonoBehaviour
 {
     private const float CELL_SIZE       = 50f;
@@ -19,6 +20,7 @@ public class DummyHeatmapDanger : MonoBehaviour
     private const float ROW_LABEL_WIDTH = 70f;
     private const float ROW_NUM_COL_WIDTH = 20f;
     private const float PADDING         = 10f;
+    private const float PADDING_X       = 0f;
     private const float PADDING_Y       = 130f;
     private const float FONT_SIZE       = 9f;
     private const float TITLE_ROW_HEIGHT = 30f;
@@ -41,6 +43,9 @@ public class DummyHeatmapDanger : MonoBehaviour
 
     public bool start = false;
 
+    // In Play mode, sizing needs the swarm's actual robot count, which DummyBFVSwarm.Awake()
+    // only populates once Play starts — Unity guarantees all Awake calls finish before any
+    // Start, so Start() (not OnEnable) is what does the real build here.
     void Start()
     {
         if (swarm == null)
@@ -52,22 +57,74 @@ public class DummyHeatmapDanger : MonoBehaviour
         }
 
         numRobots = swarm.robots.Count;
+        RebuildPanel();
+    }
+
+    // Edit mode has no Awake-populated swarm.robots to size off of, so this previews using the
+    // sum of the inspector-configured bfvGroups.robotCount instead — same total BuildSwarm()
+    // would produce, without needing to press Play. Skips (leaves any existing panel alone) if
+    // that can't be determined yet, e.g. no swarm assigned or no groups configured.
+    void OnEnable()
+    {
+        if (Application.isPlaying) return;
+
+        if (swarm == null)
+            swarm = FindObjectOfType<DummyBFVSwarm>();
+        if (swarm == null) return;
+
+        int previewCount = swarm.robots != null && swarm.robots.Count > 0
+            ? swarm.robots.Count
+            : SumGroupRobotCounts(swarm);
+        if (previewCount <= 0) return;
+
+        numRobots = previewCount;
+        RebuildPanel();
+    }
+
+    static int SumGroupRobotCounts(DummyBFVSwarm s)
+    {
+        int total = 0;
+        if (s.bfvGroups != null)
+            foreach (var g in s.bfvGroups)
+                total += g.robotCount;
+        return total;
+    }
+
+    // Always tears down and rebuilds Panel_DummyDanger from scratch, so editing
+    // PADDING_X/PADDING_Y/CELL_SIZE/etc., or the swarm's robot count, and toggling this
+    // component off/on (or re-entering Play mode) always reflects the latest values instead of
+    // leaving a stale panel in place.
+    void RebuildPanel()
+    {
         cells       = new Image[numRobots, numRobots];
         cellTexts   = new Text[numRobots, numRobots];
         cellFvIndex = new int[numRobots, numRobots];
         rowBfvTexts = new Text[numRobots];
         colBfvTexts = new Text[numRobots];
 
+        Transform existing = transform.Find("Panel_DummyDanger");
+        if (existing != null)
+        {
+            if (Application.isPlaying) Destroy(existing.gameObject);
+            else                        DestroyImmediate(existing.gameObject);
+        }
+
         BuildCanvas();
     }
 
     void BuildCanvas()
     {
-        Canvas canvas = gameObject.AddComponent<Canvas>();
-        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
-        gameObject.AddComponent<CanvasScaler>();
-        gameObject.AddComponent<GraphicRaycaster>();
+        Canvas canvas = GetComponent<Canvas>();
+        if (canvas == null)
+        {
+            canvas = gameObject.AddComponent<Canvas>();
+            canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 10;
+        }
+        if (GetComponent<CanvasScaler>() == null)
+            gameObject.AddComponent<CanvasScaler>();
+        if (GetComponent<GraphicRaycaster>() == null)
+            gameObject.AddComponent<GraphicRaycaster>();
 
         BuildGrid();
     }
@@ -82,7 +139,7 @@ public class DummyHeatmapDanger : MonoBehaviour
         panelRect.anchorMin        = new Vector2(0.5f, 0f);
         panelRect.anchorMax        = new Vector2(0.5f, 0f);
         panelRect.pivot            = new Vector2(0.5f, 0f);
-        panelRect.anchoredPosition = new Vector2(0f, PADDING_Y);
+        panelRect.anchoredPosition = new Vector2(PADDING_X, PADDING_Y);
         panelRect.sizeDelta        = new Vector2(totalWidth, totalHeight);
         Image panelImg = panel.AddComponent<Image>();
         panelImg.color = new Color(0.1f, 0.1f, 0.1f, 0.85f);
@@ -227,6 +284,7 @@ public class DummyHeatmapDanger : MonoBehaviour
 
     void Update()
     {
+        if (!Application.isPlaying) return;
         if (!start || swarm == null || cells == null) return;
 
         for (int i = 0; i < numRobots; i++)

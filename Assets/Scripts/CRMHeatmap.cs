@@ -12,6 +12,7 @@ using UnityEngine.UI;
 /// i.e. the same value CRM classifies on (see FeatureExtractor.fvIndex).
 /// Feeds from FeatureExtractor.isFaulty / feature_list_history — separate from the ML-based FaultHeatmap.
 /// </summary>
+[ExecuteAlways]
 public class CRMHeatmap : MonoBehaviour
 {
     private const int   NUM_ROBOTS      = 10;
@@ -21,7 +22,8 @@ public class CRMHeatmap : MonoBehaviour
     private const float ROW_LABEL_WIDTH = 70f;
     private const float ROW_NUM_COL_WIDTH = 20f;
     private const float PADDING         = 10f;
-    private const float PADDING_Y       = 130f;
+    private const float PADDING_X       = 525f;
+    private const float PADDING_Y       = 220f;
     private const float FONT_SIZE       = 9f;
     private const float TITLE_ROW_HEIGHT = 30f;
     private const float TOP5_ROW_HEIGHT  = 18f;
@@ -52,7 +54,27 @@ public class CRMHeatmap : MonoBehaviour
 
     public bool start = false;
 
-    void Start()
+    // Builds on enable — during the normal Play-mode lifecycle, and in Edit mode too
+    // (ExecuteAlways) so the heatmap shows in the Game view without pressing Play. Always tears
+    // down and rebuilds Panel_CRM from scratch, so editing PADDING_X/PADDING_Y/etc. and toggling
+    // this component off/on (or re-entering Play mode) always reflects the latest values instead
+    // of leaving a stale panel in place.
+    void OnEnable()
+    {
+        Transform existing = transform.Find("Panel_CRM");
+        if (existing != null)
+        {
+            if (Application.isPlaying) Destroy(existing.gameObject);
+            else                        DestroyImmediate(existing.gameObject);
+        }
+
+        BuildCanvas();
+
+        if (Application.isPlaying)
+            RefreshFeatureExtractors();
+    }
+
+    void RefreshFeatureExtractors()
     {
         featureExtractors = FindObjectsOfType<FeatureExtractor>();
 
@@ -60,17 +82,21 @@ public class CRMHeatmap : MonoBehaviour
         System.Array.Sort(featureExtractors, (a, b) =>
             int.Parse(new string(a.transform.root.name.Where(char.IsDigit).ToArray()))
             .CompareTo(int.Parse(new string(b.transform.root.name.Where(char.IsDigit).ToArray()))));
-
-        BuildCanvas();
     }
 
     void BuildCanvas()
     {
-        Canvas canvas = gameObject.AddComponent<Canvas>();
-        canvas.renderMode  = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
-        gameObject.AddComponent<CanvasScaler>();
-        gameObject.AddComponent<GraphicRaycaster>();
+        Canvas canvas = GetComponent<Canvas>();
+        if (canvas == null)
+        {
+            canvas = gameObject.AddComponent<Canvas>();
+            canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 10;
+        }
+        if (GetComponent<CanvasScaler>() == null)
+            gameObject.AddComponent<CanvasScaler>();
+        if (GetComponent<GraphicRaycaster>() == null)
+            gameObject.AddComponent<GraphicRaycaster>();
 
         BuildGrid();
     }
@@ -86,7 +112,7 @@ public class CRMHeatmap : MonoBehaviour
         panelRect.anchorMin        = new Vector2(0.5f, 0f);
         panelRect.anchorMax        = new Vector2(0.5f, 0f);
         panelRect.pivot            = new Vector2(0.5f, 0f);
-        panelRect.anchoredPosition = new Vector2(0f, PADDING_Y);
+        panelRect.anchoredPosition = new Vector2(PADDING_X, PADDING_Y);
         panelRect.sizeDelta        = new Vector2(totalWidth, totalHeight);
         Image panelImg = panel.AddComponent<Image>();
         panelImg.color = new Color(0.1f, 0.1f, 0.1f, 0.85f);
@@ -238,6 +264,8 @@ public class CRMHeatmap : MonoBehaviour
 
     void Update()
     {
+        if (!Application.isPlaying) return;
+
         if (!start)
         {
             featureExtractors = FindObjectsOfType<FeatureExtractor>();

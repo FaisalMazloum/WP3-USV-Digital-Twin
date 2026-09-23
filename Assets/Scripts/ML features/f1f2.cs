@@ -73,7 +73,7 @@ public class f1f2 : MonoBehaviour
     void PublishJointState()
     {
         float localVelocity = Vector3.Dot(rb.velocity, transform.root.forward);
-        float localOmega = Vector3.Dot(rb.angularVelocity, transform.root.up);
+        float localOmega = Vector3.Dot(rb.angularVelocity, -transform.root.up); // -up: ROS yaw (CCW +) in left-handed Unity
         
         double left_thruster_velocity = (localVelocity - (localOmega * thruster_separation / 2f)) * 100.0;  // cm/s
         double right_thruster_velocity = (localVelocity + (localOmega * thruster_separation / 2f)) * 100.0; // cm/s

@@ -147,7 +147,7 @@ public class RemoraLIDAR : MonoBehaviour
                 }
 
                 // ========== NORMAL OPERATION (NO FAULT) ==========
-                if (Physics.Raycast(transform.position, direction, out hit, rangeMax) && isFaulty != 1)
+                if (Physics.Raycast(transform.position, direction, out hit, rangeMax) && isFaulty != 1 && !hit.collider.CompareTag("ignore_collider"))
                 {
                     float distance = hit.distance;
                     // if (distance > rangeMax)

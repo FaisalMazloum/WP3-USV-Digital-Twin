@@ -7,7 +7,7 @@ using UnityEngine;
 public class remora_gizmos : MonoBehaviour
 {
 
-    private Rigidbody rb;
+    public Rigidbody rb;
     private AdaptiveSamplingPattern adaptive_sampling_;
     private NeighborStateManager neighbor_state_manager_;
     private RABSensor rab_;
@@ -82,7 +82,7 @@ public class remora_gizmos : MonoBehaviour
         // =======================================================================
         //                              VELOCITY
         // =======================================================================
-        if (Application.isPlaying)
+        // if (Application.isPlaying)
         {
             GUIStyle style = new GUIStyle();
             style.fontSize = 8;
@@ -105,7 +105,7 @@ public class remora_gizmos : MonoBehaviour
                 Dictionary<string, float> actual = thrusters_.GetActualThrusterSpeeds();
 
                 UnityEditor.Handles.Label(
-                    transform.position + Vector3.forward * 1.1f + Vector3.right * 0f,
+                    transform.position + Vector3.forward * 0.85f + Vector3.right * 0f,
                     $"L: intent={intent["left_thruster"]:F1} true={actual["left_thruster"]:F1} | " +
                     $"R: intent={intent["right_thruster"]:F1} true={actual["right_thruster"]:F1} cm/s",
                     style
@@ -251,8 +251,8 @@ public class remora_gizmos : MonoBehaviour
                 {
                     style.normal.textColor = Color.red;
                     UnityEditor.Handles.Label(transform.position + Vector3.forward * 0.25f, $"{neighbor_state_manager_.robotID.ToUpper()}", style);
-                    DrawSonarRings(transform.root.position, Color.red, speed: 0.7f, numRings: 2);
-                    DrawSonarRings(transform.root.position, new Color(0.7f, 0.1f, 0.1f, 0.8f), speed: 0.7f, numRings: 2);
+                    DrawSonarRings(transform.root.position + Vector3.up * 2f, Color.red, speed: 0.7f, numRings: 2);
+                    DrawSonarRings(transform.root.position + Vector3.up * 2f, new Color(0.7f, 0.1f, 0.1f, 0.8f), speed: 0.7f, numRings: 2);
                 }
                 else
                 {
@@ -299,81 +299,81 @@ public class remora_gizmos : MonoBehaviour
     // =======================================================================
     //                        CRM FAULT DETECTION
     // =======================================================================
-    if (Application.isPlaying)
-    {
-        FeatureExtractor fe = transform.root.GetComponentInChildren<FeatureExtractor>();
-        if (fe == null || fe.isFaulty == null || fe.crmInstance == null) return;
+    // if (Application.isPlaying)
+    // {
+    //     FeatureExtractor fe = transform.root.GetComponentInChildren<FeatureExtractor>();
+    //     if (fe == null || fe.isFaulty == null || fe.crmInstance == null) return;
 
-        GUIStyle style = new GUIStyle();
-        style.fontSize  = 8;
-        style.fontStyle = FontStyle.Bold;
-        style.alignment = TextAnchor.UpperLeft;
+    //     GUIStyle style = new GUIStyle();
+    //     style.fontSize  = 8;
+    //     style.fontStyle = FontStyle.Bold;
+    //     style.alignment = TextAnchor.UpperLeft;
 
-        // offset label position upward so it does not overlap existing labels
-        Vector3 basePos = transform.position + Vector3.forward * -0.5f;
+    //     // offset label position upward so it does not overlap existing labels
+    //     Vector3 basePos = transform.position + Vector3.forward * -0.5f;
 
-        // ----------- per observed robot
-        int lineOffset = 0;
-        foreach (var kvp in fe.isFaulty)
-        {
-            GameObject observedRobot = kvp.Key;
-            bool       faulty        = kvp.Value;
-            if (observedRobot == null) continue;
+    //     // ----------- per observed robot
+    //     int lineOffset = 0;
+    //     foreach (var kvp in fe.isFaulty)
+    //     {
+    //         GameObject observedRobot = kvp.Key;
+    //         bool       faulty        = kvp.Value;
+    //         if (observedRobot == null) continue;
 
-            // get FV index for this observed robot
-            var history = fe.feature_list_history;
-            if (!history.ContainsKey(observedRobot) || history[observedRobot].Count == 0) continue;
+    //         // get FV index for this observed robot
+    //         var history = fe.feature_list_history;
+    //         if (!history.ContainsKey(observedRobot) || history[observedRobot].Count == 0) continue;
 
-            FeatureExtractor.allFeatures latest = history[observedRobot][history[observedRobot].Count - 1];
-            int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
-                        (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
+    //         FeatureExtractor.allFeatures latest = history[observedRobot][history[observedRobot].Count - 1];
+    //         int fvIndex = (latest.F1 << 0) | (latest.F2 << 1) | (latest.F3 << 2) |
+    //                     (latest.F4 << 3) | (latest.F5 << 4) | (latest.F6 << 5);
 
-            // CRM classification for this FV
-            int crm = fe.crmInstance.FVClassification[fvIndex];
-            string crmLabel = crm == 1 ? "ATK" : crm == 2 ? "TOL" : "UND";
+    //         // CRM classification for this FV
+    //         int crm = fe.crmInstance.FVClassification[fvIndex];
+    //         string crmLabel = crm == 1 ? "ATK" : crm == 2 ? "TOL" : "UND";
 
-            // attack count in rolling window
-            int attackCount = 0;
-            if (fe.crmHistory.ContainsKey(observedRobot))
-                foreach (int c in fe.crmHistory[observedRobot])
-                    if (c == 1) attackCount++;
+    //         // attack count in rolling window
+    //         int attackCount = 0;
+    //         if (fe.crmHistory.ContainsKey(observedRobot))
+    //             foreach (int c in fe.crmHistory[observedRobot])
+    //                 if (c == 1) attackCount++;
 
-            // affinity-weighted TE and TR for this FV's clone
-            double sumE = 0.0, sumR = 0.0;
-            for (int i = 0; i < 64; i++)
-            {
-                if (fe.crmInstance.TE[i] + fe.crmInstance.TR[i] <= 1e-3) continue;
-                double th = fe.crmInstance.theta[i, fvIndex];
-                sumE += th * fe.crmInstance.TE[i];
-                sumR += th * fe.crmInstance.TR[i];
-            }
+    //         // affinity-weighted TE and TR for this FV's clone
+    //         double sumE = 0.0, sumR = 0.0;
+    //         for (int i = 0; i < 64; i++)
+    //         {
+    //             if (fe.crmInstance.TE[i] + fe.crmInstance.TR[i] <= 1e-3) continue;
+    //             double th = fe.crmInstance.theta[i, fvIndex];
+    //             sumE += th * fe.crmInstance.TE[i];
+    //             sumR += th * fe.crmInstance.TR[i];
+    //         }
 
-            // label color
-            style.normal.textColor = faulty ? new Color(1.0f, 0.1f, 0.1f, 1.0f) : Color.green;
-            if (lineOffset != 0)
-            {
+    //         // label color
+    //         style.normal.textColor = faulty ? new Color(1.0f, 0.1f, 0.1f, 1.0f) : Color.green;
+    //         if (lineOffset != 0)
+    //         {
                     
-            }
-            string label =
-                $"r{observedRobot.name.Substring(6)} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
-                $"CRM={crmLabel} | TE={sumE:F1} TR={sumR:F1} | " +
-                $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
+    //         }
+    //         string label =
+    //             $"r{observedRobot.name.Substring(6)} | FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) | " +
+    //             $"CRM={crmLabel} | TE={sumE:F1} TR={sumR:F1} | " +
+    //             $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
 
-            UnityEditor.Handles.Label(
-                basePos + Vector3.forward * (-0.3f * lineOffset),
-                label, style);
+    //         UnityEditor.Handles.Label(
+    //             basePos + Vector3.forward * (-0.3f * lineOffset),
+    //             label, style);
 
-            // string label =
-            //     // $"r{observedRobot.name.Substring(6)} \n FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) \n " +
-            //     // $"CRM={crmLabel} \n TE={sumE:F1} TR={sumR:F1} \n " +
-            //     // $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
-            // UnityEditor.Handles.Label(
-            //     basePos + Vector3.forward * (-1f * lineOffset),
-            //     label, style);
+    //         // string label =
+    //         //     // $"r{observedRobot.name.Substring(6)} \n FV={fvIndex:D2}({System.Convert.ToString(fvIndex, 2).PadLeft(6, '0')}) \n " +
+    //         //     // $"CRM={crmLabel} \n TE={sumE:F1} TR={sumR:F1} \n " +
+    //         //     // $"ATK={attackCount}/{FeatureExtractor.CRM_HISTORY_LENGTH}";
+    //         // UnityEditor.Handles.Label(
+    //         //     basePos + Vector3.forward * (-1f * lineOffset),
+    //         //     label, style);
 
-            lineOffset++;
-        }
-    }
+    //         lineOffset++;
+    //     }
+    // }
 
 
     // =======================================================================
@@ -457,66 +457,67 @@ public class remora_gizmos : MonoBehaviour
     // and flashed (green/red) for RESULT_FLASH_DURATION, independent of DangerCascadeController's
     // own read-and-reset timing on the emitter (which may zero AgreedN/BlinksCounted within about
     // a second of WindowComplete becoming true, once some observer's ladder consumes it).
-    if (Application.isPlaying && blink_emitter_ != null)
-    {
-        bool activelyProbing = blink_emitter_.IsProbing && !blink_emitter_.WindowComplete;
 
-        // new probe episode just started -> reset per-episode tracking
-        if (activelyProbing && !wasProbingActive_)
-        {
-            lastSeenBlinkCount_ = 0;
-            resultCaptured_ = false;
-        }
+    // if (Application.isPlaying && blink_emitter_ != null)
+    // {
+    //     bool activelyProbing = blink_emitter_.IsProbing && !blink_emitter_.WindowComplete;
 
-        Vector3 iconPos = transform.position + Vector3.up * 1.5f;
-        // shifted off to the side and down from the old right-on-top-of-the-robot spot
-        Vector3 textPos = transform.position + Vector3.right * 1.3f + Vector3.up * 0.4f;
+    //     // new probe episode just started -> reset per-episode tracking
+    //     if (activelyProbing && !wasProbingActive_)
+    //     {
+    //         lastSeenBlinkCount_ = 0;
+    //         resultCaptured_ = false;
+    //     }
 
-        if (activelyProbing)
-        {
-            // detect a new blink pulse since last draw
-            if (blink_emitter_.BlinksCounted != lastSeenBlinkCount_)
-            {
-                lastBlinkFlashTime_ = Time.time;
-                lastSeenBlinkCount_ = blink_emitter_.BlinksCounted;
-            }
+    //     Vector3 iconPos = transform.position + Vector3.up * 1.5f;
+    //     // shifted off to the side and down from the old right-on-top-of-the-robot spot
+    //     Vector3 textPos = transform.position + Vector3.right * 1.3f + Vector3.up * 0.4f;
 
-            // one-shot expanding cyan ring per blink pulse — much more noticeable than a static
-            // flashing dot, reuses the same ring-drawing technique as DrawSonarRings but as a
-            // single expand-and-fade triggered by the blink instead of a continuous loop.
-            float blinkRingElapsed = Time.time - lastBlinkFlashTime_;
-            DrawOneShotRing(transform.root.position + Vector3.up * 1.5f, new Color(1f,0.2f,0.2f,1f), blinkRingElapsed, BLINK_RING_DURATION, BLINK_RING_MAX_RADIUS);
+    //     if (activelyProbing)
+    //     {
+    //         // detect a new blink pulse since last draw
+    //         if (blink_emitter_.BlinksCounted != lastSeenBlinkCount_)
+    //         {
+    //             lastBlinkFlashTime_ = Time.time;
+    //             lastSeenBlinkCount_ = blink_emitter_.BlinksCounted;
+    //         }
 
-            GUIStyle counterStyle = new GUIStyle();
-            counterStyle.fontSize = 8;
-            counterStyle.fontStyle = FontStyle.Bold;
-            counterStyle.alignment = TextAnchor.MiddleCenter;
-            counterStyle.normal.textColor = Color.white;
-            UnityEditor.Handles.Label(textPos, $"BLINK {blink_emitter_.BlinksCounted}/{blink_emitter_.AgreedN}", counterStyle);
-        }
-        else if (blink_emitter_.IsProbing && blink_emitter_.WindowComplete && !resultCaptured_)
-        {
-            // probe just completed this episode -> latch pass/fail once
-            lastProbePassed_ = blink_emitter_.BlinksCounted == blink_emitter_.AgreedN;
-            resultFlashStartTime_ = Time.time;
-            resultCaptured_ = true;
-        }
+    //         // one-shot expanding cyan ring per blink pulse — much more noticeable than a static
+    //         // flashing dot, reuses the same ring-drawing technique as DrawSonarRings but as a
+    //         // single expand-and-fade triggered by the blink instead of a continuous loop.
+    //         float blinkRingElapsed = Time.time - lastBlinkFlashTime_;
+    //         DrawOneShotRing(transform.root.position + Vector3.up * 1.5f, new Color(1f,0.2f,0.2f,1f), blinkRingElapsed, BLINK_RING_DURATION, BLINK_RING_MAX_RADIUS);
 
-        if (resultCaptured_ && (Time.time - resultFlashStartTime_) < RESULT_FLASH_DURATION)
-        {
-            Gizmos.color = lastProbePassed_ ? new Color(0.2f, 1.0f, 0.2f, 0.9f) : new Color(1.0f, 0.15f, 0.15f, 0.9f);
-            Gizmos.DrawSphere(iconPos, 0.15f);
+    //         GUIStyle counterStyle = new GUIStyle();
+    //         counterStyle.fontSize = 8;
+    //         counterStyle.fontStyle = FontStyle.Bold;
+    //         counterStyle.alignment = TextAnchor.MiddleCenter;
+    //         counterStyle.normal.textColor = Color.white;
+    //         UnityEditor.Handles.Label(textPos, $"BLINK {blink_emitter_.BlinksCounted}/{blink_emitter_.AgreedN}", counterStyle);
+    //     }
+    //     else if (blink_emitter_.IsProbing && blink_emitter_.WindowComplete && !resultCaptured_)
+    //     {
+    //         // probe just completed this episode -> latch pass/fail once
+    //         lastProbePassed_ = blink_emitter_.BlinksCounted == blink_emitter_.AgreedN;
+    //         resultFlashStartTime_ = Time.time;
+    //         resultCaptured_ = true;
+    //     }
 
-            GUIStyle resultStyle = new GUIStyle();
-            resultStyle.fontSize = 9;
-            resultStyle.fontStyle = FontStyle.Bold;
-            resultStyle.alignment = TextAnchor.MiddleCenter;
-            resultStyle.normal.textColor = lastProbePassed_ ? Color.green : Color.red;
-            UnityEditor.Handles.Label(textPos, lastProbePassed_ ? "PROBE PASS" : "PROBE FAIL", resultStyle);
-        }
+    //     if (resultCaptured_ && (Time.time - resultFlashStartTime_) < RESULT_FLASH_DURATION)
+    //     {
+    //         Gizmos.color = lastProbePassed_ ? new Color(0.2f, 1.0f, 0.2f, 0.9f) : new Color(1.0f, 0.15f, 0.15f, 0.9f);
+    //         Gizmos.DrawSphere(iconPos, 0.15f);
 
-        wasProbingActive_ = activelyProbing;
-    }
+    //         GUIStyle resultStyle = new GUIStyle();
+    //         resultStyle.fontSize = 9;
+    //         resultStyle.fontStyle = FontStyle.Bold;
+    //         resultStyle.alignment = TextAnchor.MiddleCenter;
+    //         resultStyle.normal.textColor = lastProbePassed_ ? Color.green : Color.red;
+    //         UnityEditor.Handles.Label(textPos, lastProbePassed_ ? "PROBE PASS" : "PROBE FAIL", resultStyle);
+    //     }
+
+    //     wasProbingActive_ = activelyProbing;
+    // }
 
 
     // =======================================================================

@@ -29,6 +29,14 @@ public class CmdVel_Subscriber : MonoBehaviour
     // [SerializeField]
     private Transform leftThruster;
 
+    // Kinematic drive (rb.velocity/rb.angularVelocity written straight from the target, no
+    // physics-driven roll/pitch) requires pitch/roll to be forcibly zeroed every tick, since it
+    // never lets real force/torque perturb the hull in the first place. Force-based drive (below,
+    // via rb.AddForceAtPosition) is genuinely physics-driven and should NOT have pitch/roll reset
+    // out from under it. Only true while the kinematic-drive block is actually in use.
+    [SerializeField]
+    public bool useKinematicDrive = false;
+
     [Header("Desired Velocities")]
     private float desiredSpeed = 0f;
     private float desiredOmega = 0f;
@@ -89,6 +97,11 @@ public class CmdVel_Subscriber : MonoBehaviour
     public string robotID = "remora0";
     public string rosTopic;
 
+    // ROS yaw axis in Unity: positive angular.z is counter-clockwise viewed from above (turn left),
+    // but Unity is left-handed, so positive rotation about +up is clockwise. Every write/read of
+    // body omega goes through -up so kinematic drive, force drive and the readbacks agree.
+    private Vector3 YawAxis => -transform.up;
+
 
     void Start()
     {
@@ -128,8 +141,11 @@ public class CmdVel_Subscriber : MonoBehaviour
             // print_RUL=false;
         }
 
-        Vector3 euler = transform.eulerAngles;
-        transform.rotation = Quaternion.Euler(0f, euler.y, 0f);
+        if (useKinematicDrive)
+        {
+            Vector3 euler = transform.eulerAngles;
+            transform.rotation = Quaternion.Euler(0f, euler.y, 0f);
+        }
 
         // ========== UPDATE DEGRADATION ==========
         if (isGradualDegradationActive)
@@ -180,35 +196,40 @@ public class CmdVel_Subscriber : MonoBehaviour
         // =======================================================================
         //                         KINEMATIC THRUSTER DRIVE
         // =======================================================================
-        // float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
-        // float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
+        if (useKinematicDrive)
+        {
+            float bodyForwardTarget = (v_left_target + v_right_target) / 2f;
+            float bodyOmegaRadTarget = (v_right_target - v_left_target) / thruster_separation;
 
-        // rb.velocity = rb.transform.forward * bodyForwardTarget;
-        // rb.angularVelocity = transform.up * bodyOmegaRadTarget;
-
+            rb.velocity = rb.transform.forward * bodyForwardTarget;
+            rb.angularVelocity = YawAxis * bodyOmegaRadTarget;
+        }
 
         // =======================================================================
         //                      FORCE BASED THRUSTER DRIVE
         // =======================================================================
-        Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
-        Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
-        
-        float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
-        float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
-        
-        float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
-        float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
-        
-        rightForce *= Rmotor_state;
-        leftForce *= Lmotor_state;
-        
-        if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+        if (!useKinematicDrive)
         {
-            rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
-        }
-        if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
-        {
-            rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
+            Vector3 rightVel = rb.GetPointVelocity(rightThruster.position);
+            Vector3 leftVel = rb.GetPointVelocity(leftThruster.position);
+            
+            float v_right_current = Vector3.Dot(rightVel, rb.transform.forward);
+            float v_left_current = Vector3.Dot(leftVel, rb.transform.forward);
+            
+            float rightForce = CalculatePID(v_right_target, v_right_current, ref rightIntegral, ref rightPreviousError);
+            float leftForce = CalculatePID(v_left_target, v_left_current, ref leftIntegral, ref leftPreviousError);
+            
+            rightForce *= Rmotor_state;
+            leftForce *= Lmotor_state;
+            
+            // if (rightWaterObject != null && rightWaterObject.IsTouchingWater())
+            {
+                rb.AddForceAtPosition(rb.transform.forward * rightForce, rightThruster.position, ForceMode.Acceleration);
+            }
+            // if (leftWaterObject != null && leftWaterObject.IsTouchingWater())
+            {
+                rb.AddForceAtPosition(rb.transform.forward * leftForce, leftThruster.position, ForceMode.Acceleration);
+            }
         }
 
     }
@@ -230,13 +251,11 @@ public class CmdVel_Subscriber : MonoBehaviour
     {
         // rb = GameObject.Find("V3 - REMORA bot").GetComponent<Rigidbody>();
         rb = GameObject.Find(robotID).GetComponent<Rigidbody>();
-        // Swapped: the "motor right"/"motor left" GameObjects are physically mirrored relative to
-        // their names — under force/PID drive (which applies real torque at these exact
-        // positions), that mislabeling made the PID correctly converge each real motor to the
-        // WRONG target, producing an exact left/right swap in GetActualThrusterSpeeds() versus
-        // intent. Kinematic drive never references these Transforms, so it's unaffected either way.
-        rightThruster = rb.transform.Find("motor left").transform;
-        leftThruster = rb.transform.Find("motor right").transform;
+        // "motor right" really sits at local +x (right side). The left/right swap previously seen in
+        // GetActualThrusterSpeeds() came from reading omega about +up (Unity's +Y is clockwise from
+        // above, ROS angular.z is counter-clockwise), not from mislabeled motors — see YawAxis.
+        rightThruster = rb.transform.Find("motor right").transform;
+        leftThruster = rb.transform.Find("motor left").transform;
         rightWaterObject = rightThruster.GetComponentInChildren<WaterObject>();
         leftWaterObject = leftThruster.GetComponentInChildren<WaterObject>();
     }
@@ -320,7 +339,7 @@ public class CmdVel_Subscriber : MonoBehaviour
     /// <summary> Real achieved body angular velocity about the up axis (deg/s) — ground truth, for verifying an actuator probe. </summary>
     public float GetActualOmegaDegPerSec()
     {
-        return rb != null ? Vector3.Dot(rb.angularVelocity, transform.up) * Mathf.Rad2Deg : 0f;
+        return rb != null ? Vector3.Dot(rb.angularVelocity, YawAxis) * Mathf.Rad2Deg : 0f;
     }
 
     /// <summary>
@@ -348,7 +367,7 @@ public class CmdVel_Subscriber : MonoBehaviour
         // sign convention, which silently swapped left/right once drive went kinematic — the
         // scalar round-trip avoids that entirely.)
         float localVelocity = Vector3.Dot(rb.velocity, rb.transform.forward);
-        float localOmega = Vector3.Dot(rb.angularVelocity, transform.up);
+        float localOmega = Vector3.Dot(rb.angularVelocity, YawAxis);
 
         speeds["left_thruster"] = (localVelocity - (localOmega * thruster_separation / 2f)) * 100f;
         speeds["right_thruster"] = (localVelocity + (localOmega * thruster_separation / 2f)) * 100f;

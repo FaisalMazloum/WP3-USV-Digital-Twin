@@ -577,7 +577,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e9ce2cb7cd50cfda9637751cc8288b7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tagID: default
 --- !u!64 &28775662
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -694,8 +693,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbba4a9eb7138b88396243f0f6597826, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  envrionment_origin: {x: 100, y: 4, z: 100}
   robotPrefab: {fileID: 413413381}
-  numberOfRobots: 9
+  numberOfRobots: 4
   spacing: 1
   selected_layout: 2
   arenaSize: 20
@@ -1550,10 +1550,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c91c89f01aaf3d65f8caf41bb186ed02, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  fov: 120
-  range: 5
-  raysPerTag: 20
-  detectionThreshold: 0.9
 --- !u!1001 &106404989
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -7999,7 +7995,7 @@ MonoBehaviour:
   centerOfMass: {x: 0, y: 0, z: 0}
   combinedCenterOfMass: {x: 0, y: 0, z: 0}
   useDefaultInertia: 1
-  inertiaTensor: {x: 0, y: 0.06254732, z: 0}
+  inertiaTensor: {x: 0.5460867, y: 0.06254732, z: 0.54552394}
   combinedInertiaTensor: {x: 8.973207e+11, y: 7.726411e+11, z: 1.2467963e+11}
 --- !u!114 &413413386
 MonoBehaviour:
@@ -8038,7 +8034,7 @@ Rigidbody:
   m_UseGravity: 1
   m_IsKinematic: 0
   m_Interpolate: 0
-  m_Constraints: 80
+  m_Constraints: 0
   m_CollisionDetection: 0
 --- !u!4 &413413388
 Transform:
@@ -8079,6 +8075,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ros: {fileID: 1623410253}
   _AdaptiveSampler: {fileID: 413413391}
+  useKinematicDrive: 0
   thruster_separation: 0
   Kp: 10
   Ki: 5
@@ -8087,6 +8084,8 @@ MonoBehaviour:
   maxForce: 0.3
   print_RUL: 0
   in_dropout: 0
+  jerkThreshold: 0.1
+  commandSettleDuration: 0.5
   robotID: remora0
   rosTopic: 
 --- !u!114 &413413390
@@ -10034,7 +10033,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &521902327
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -10050,15 +10049,9 @@ MonoBehaviour:
   spawnerUI: {fileID: 1398189929}
   faultInjector: {fileID: 1970658656}
   globalCSVExporter: {fileID: 989455816}
+  patternSelector: {fileID: 0}
   numberOfRuns: 1
   autoStart: 1
-  initialWait: 5.5
-  postSpawnWait: 5
-  ROS2Wait: 10
-  stabalizePeriod: 10
-  postStartWait: 10
-  postFaultWait: 10
-  sceneReloadWait: 5
 --- !u!4 &521902328
 Transform:
   m_ObjectHideFlags: 0
@@ -16479,7 +16472,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e9ce2cb7cd50cfda9637751cc8288b7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tagID: default
 --- !u!64 &826339013
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -18450,7 +18442,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e9ce2cb7cd50cfda9637751cc8288b7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tagID: default
 --- !u!1 &936105769 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 8164078558771037576, guid: c8dacd6a514cda3a8ad8c7bae9b29a92, type: 3}
@@ -18966,7 +18957,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &983131848
 Transform:
   m_ObjectHideFlags: 0
@@ -18976,8 +18967,8 @@ Transform:
   m_GameObject: {fileID: 983131847}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 100, y: 1, z: 100}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 100, y: -4.2, z: 100}
+  m_LocalScale: {x: 0.5, y: 1, z: 0.5}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 153320454}
@@ -19887,7 +19878,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e9ce2cb7cd50cfda9637751cc8288b7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tagID: default
 --- !u!64 &1040870547
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -23498,7 +23488,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1228924896
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -30849,6 +30839,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   print_button: 0
+  max_range: 0
   _neighborStateManager: {fileID: 1609780195}
   _csvExporter: {fileID: 989455816}
 --- !u!114 &1609780195
@@ -30863,12 +30854,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d34dab1871b570a69be28324d7c7c3cf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  showRays: 0
   _debugController: {fileID: 1847385724}
   _thrustController: {fileID: 1994622783}
   _cmdSubscriber: {fileID: 413413389}
   _csvExporter: {fileID: 989455816}
   _faultInjector: {fileID: 1970658656}
+  showRays: 0
   publishTopic: 
   robotID: 
   publishInterval: 0.1
@@ -30889,6 +30880,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e0e3e639038bd08090b789b8109bfcc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  publishTopic: 
+  robotID: 
   _csvExporter: {fileID: 989455816}
   first_reset: 0
   creatingNewSample: 0
@@ -38460,6 +38453,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _manualController: {fileID: 1994622783}
+  patternSelector: {fileID: 0}
+  softwareHangDriveRobotId: 0
+  softwareHangDrivePattern: 4
   selectedFault: 8
   faulty_robots:
   - remora0
@@ -41846,7 +41842,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _version: 0
   _radius: 0.3
-  _weight: 0.5
+  _weight: 1.25
   _weightUpDownMul: 0.5
   _innerSphereMultiplier: 1.55
   _innerSphereOffset: 0.109

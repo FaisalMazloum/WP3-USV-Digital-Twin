@@ -50,20 +50,20 @@ public class AutomatedDataCollection : MonoBehaviour
 //         postSpawnWait = 5f;
 //         ROS2Wait = 5f;
 
-        // stabalizePeriod = -1f;
-        // postStartCollectionWait = -1f;
-        // postFaultWait = -1f;
-        // sceneReloadWait = -1f;
+        stabalizePeriod = -1f;
+        postStartCollectionWait = -1f;
+        postFaultWait = -1f;
+        sceneReloadWait = -1f;
 
-// ================ T-RO TEST ================
+// ================ ICRA TEST ================
         initialWait = 15f;
         postSpawnWait = 5f;
         ROS2Wait = 20f;
 
-        stabalizePeriod = 30f;
-        postStartCollectionWait = 150f;     // to collect samples before fault injection
-        postFaultWait = 150f;               // to collect samples after fault injection
-        sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
+        // stabalizePeriod = 30f;
+        // postStartCollectionWait = 150f;     // to collect samples before fault injection
+        // postFaultWait = 150f;               // to collect samples after fault injection
+        // sceneReloadWait = 5f;              // period to allow the data to flush cleanly into a CSV
 
 // ================ Quick Testing ================
         // initialWait = 1.5f;
@@ -71,7 +71,7 @@ public class AutomatedDataCollection : MonoBehaviour
         // ROS2Wait = 1f;
         // stabalizePeriod = 1f;
         // postStartCollectionWait = 10f;
-        // postFaultWait = 80f;
+        // postFaultWait = 0f;
         // sceneReloadWait = 10f;
 
 
@@ -145,7 +145,7 @@ public class AutomatedDataCollection : MonoBehaviour
         if(postFaultWait != -1f)
         {
             // SetPatternAssignmentZero(PatternSelector.PatternType.aggregation_pattern);       // SWITCH TASK FOR ALL ROBOTS (except for the robot with software hang fault injected)
-            // SetPatternAssignmentZero(PatternSelector.PatternType.drive_pattern);             // SWITCH TASK FOR ALL ROBOTS (except for the robot with software hang fault injected)
+            SetPatternAssignmentZero(PatternSelector.PatternType.drive_pattern);             // SWITCH TASK FOR ALL ROBOTS (except for the robot with software hang fault injected)
             Debug.Log("[DataCollection] Injected fault...");
             TriggerBooleanField(faultInjector, "injectFault");
             yield return new WaitForSeconds(postFaultWait);

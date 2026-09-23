@@ -551,12 +551,22 @@ public class DangerCascadeController : MonoBehaviour
 
             case RobotFaultState.DISCREPANCY_PASSED:
             {
-                // Only the probe(s) selected by probeMode are dispatched — see CombineProbeResults
-                // for how a disabled probe is excluded from judgment rather than treated as an
-                // automatic pass. Shared across the live ladder and all three ablation variants —
-                // there's only one real robot/emitter pair to probe, so whichever ladder gets here
-                // first drives the actual physical probe(s) and the others read the same shared
-                // results.
+                // Only the LIVE ladder (the one in `ladders`, driving heatmap/currentState) may
+                // physically dispatch probes. The ablation ladders (Full/NoDisc) always run with
+                // probing on regardless of the live ladder's state, so letting them call
+                // RequestProbe() made robots rotate before the live ladder ever left NORMAL (and
+                // re-probed robots the live ladder had already CLEARED). An ablation ladder parks
+                // here until the live ladder is itself PROBING, then just reads that shared,
+                // already-running probe's result without dispatching.
+                bool isLiveLadder = ladders.TryGetValue(observedRobot, out LadderEntry liveLadder)
+                    && ReferenceEquals(liveLadder, ladder);
+                if (!isLiveLadder)
+                {
+                    if (liveLadder != null && liveLadder.state == RobotFaultState.PROBING)
+                        ladder.state = RobotFaultState.PROBING;
+                    break;
+                }
+
                 if (probeMode != ProbeMode.BlinkOnly)
                 {
                     ActuatorEmitter actuatorEmitter = GetActuatorEmitter(observedRobot);

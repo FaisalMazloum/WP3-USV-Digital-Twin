@@ -92,10 +92,10 @@ public class FeatureExtractor : MonoBehaviour
     // ==============================================================================
     //                      FAULT DETECTION PARAMETERS (TARAPORE) 
     // ==============================================================================
-    // private float F1_threshold = 0.15f * 2;
-    // private float F2_threshold = 0.30f * 2;
-    private float F1_threshold = 0.15f / 2; // causes unimodal behaviour for CRM
-    private float F2_threshold = 0.30f / 2; // causes unimodal behaviour for CRM
+    private float F1_threshold = 0.15f;
+    private float F2_threshold = 0.30f;
+    // private float F1_threshold = 0.15f / 2; // causes unimodal behaviour for CRM
+    // private float F2_threshold = 0.30f / 2; // causes unimodal behaviour for CRM
 
     // ==============================================================================
     //                                  CRM 
@@ -476,9 +476,13 @@ public class FeatureExtractor : MonoBehaviour
 
             int F1_true_count = F1_observations[observedRobot].Where(n => n != 0).Count();
             int F2_true_count = F2_observations[observedRobot].Where(n => n != 0).Count();
-            int F4_true_count = F4_observations[observedRobot].Count(n => n > 0.1); // n is already Mj = normalizedAngularAcceleration * distanceWsNormalized at observation time
-            int F5_true_count = F5_observations[observedRobot].Count(n => n > 0.1);
-            int F6_true_count = F6_observations[observedRobot].Count(n => n > 0.1);
+            // int F4_true_count = F4_observations[observedRobot].Count(n => n > 0.1); // n is already Mj = normalizedAngularAcceleration * distanceWsNormalized at observation time
+            // int F5_true_count = F5_observations[observedRobot].Count(n => n > 0.1);
+            // int F6_true_count = F6_observations[observedRobot].Count(n => n > 0.1);
+
+            int F4_true_count = F4_observations[observedRobot].Count(n => n > 0.05); // n is already Mj = normalizedAngularAcceleration * distanceWsNormalized at observation time
+            int F5_true_count = F5_observations[observedRobot].Count(n => n > 0.05);
+            int F6_true_count = F6_observations[observedRobot].Count(n => n > 0.05);
 
             // ========== GET RUL FROM OBSERVED ROBOT ==========
             float rul = -1f;  // Default for non-faulty robots
@@ -516,22 +520,25 @@ public class FeatureExtractor : MonoBehaviour
             // Create feature sample
             allFeatures sample = new allFeatures(
                 Time.fixedTime,
-                // Numerical features
+                //// Numerical features
                 f1_observations[observedRobot],
                 f2_observations[observedRobot],
                 f3_observations[observedRobot],
                 f4_observations[observedRobot],
                 distance_Wl,
-                // Binary features
+                //// Binary features
                 ((float)F1_true_count / Wl_observations) > 0.5 ? 1 : 0,
                 ((float)F2_true_count / Wl_observations) > 0.5 ? 1 : 0,
                 (distance_Wl > 0.15 * Wl * max_speed * 100) ? 1 : 0, // 100 for (cm) units
-                ((float)F4_true_count / Wl_observations) > 0.05 ? 1 : 0,
-                ((float)F5_true_count / Wl_observations) > 0.05 ? 1 : 0,
-                ((float)F6_true_count / Wl_observations) > 0.05 ? 1 : 0,
-                // RUL
+                // ((float)F4_true_count / Wl_observations) > 0.05 ? 1 : 0, // TEST higher threshold since 10% would result in a single turn triggering the threshold.
+                // ((float)F5_true_count / Wl_observations) > 0.05 ? 1 : 0,
+                // ((float)F6_true_count / Wl_observations) > 0.05 ? 1 : 0,
+                ((float)F4_true_count / Wl_observations) > 0.15 ? 1 : 0, // TEST higher threshold since 10% would result in a single turn triggering the threshold.
+                ((float)F5_true_count / Wl_observations) > 0.15 ? 1 : 0,
+                ((float)F6_true_count / Wl_observations) > 0.15 ? 1 : 0,
+                //// RUL
                 rul,
-                // Intermittend Fault and Turn History
+                //// Intermittend Fault and Turn History
                 inDropout,
                 turns
             );
