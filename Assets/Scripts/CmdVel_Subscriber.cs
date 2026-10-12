@@ -129,7 +129,7 @@ public class CmdVel_Subscriber : MonoBehaviour
     {
         desiredSpeed = (float)msg.linear.x;
         // desiredSpeed = (float)msg.linear.x * 10f;
-        desiredOmega = (float)msg.angular.z;
+        desiredOmega = (float)msg.angular.z * -1;
         // Debug.Log($"Linear.x = {desiredSpeed} || Angular.z = {desiredOmega}");
     }
 

@@ -79,7 +79,7 @@ tmux send-keys -t $SESSION "$FULL_SETUP" C-m
 # tmux send-keys -t $SESSION "sleep 15; echo '--- Starting Controller ---'; ros2 launch remora_controller swarm_controller.launch.py robot_count:=10 pattern:=minimalist_flocking_pattern" C-m
 # tmux send-keys -t $SESSION "sleep 15; echo '--- Starting Controller ---'; ros2 launch remora_controller swarm_controller_timed_switch.launch.py robot_count:=10 pattern_a:=dispersion_pattern pattern_b:=aggregation_pattern switch_duration:=30.0" C-m
 # tmux send-keys -t $SESSION "sleep 15; echo '--- Starting Controller ---'; ros2 launch remora_controller swarm_controller_staggered_switch.launch.py robot_count:=10 pattern_a:=random_walk_pattern pattern_b:=aggregation_pattern switch_duration:=30.0 stagger_duration:=15.0" C-m
-tmux send-keys -t $SESSION "sleep 0; echo '--- Starting Controller ---'; ros2 launch remora_controller swarm_controller_dynamic_switch.launch.py robot_count:=10 initial_pattern:=drive_pattern" C-m
+# tmux send-keys -t $SESSION "sleep 0; echo '--- Starting Controller ---'; ros2 launch remora_controller swarm_controller_dynamic_switch.launch.py robot_count:=10 initial_pattern:=random_walk_pattern" C-m
 
 
 # --- PANE 2: PUBLISHER (Bottom Left) ---
