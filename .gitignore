@@ -7,3 +7,6 @@ UIElementsSchema/
 *.csproj
 *.sln
 mono_crash.mem.*
+Assets/Scripts/data/
+Assets/Scripts/data.meta
+Assets/training_data_*.csv*
